@@ -3,6 +3,8 @@ langchain==0.3.27
 langchain-core==0.3.72
 langchain-community==0.3.27
 
+huggingface-hub>=0.30,<2.0
+
 transformers==4.53.3
 
 fastapi==0.116.1
