@@ -2,6 +2,8 @@ langgraph==0.6.7
 langchain==0.3.27
 langchain-core==0.3.72
 langchain-community==0.3.27
+langchain-deepseek<1.0.1
+langchain-qwq<0.3.4
 
 transformers==4.53.3
 
