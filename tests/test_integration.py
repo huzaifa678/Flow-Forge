@@ -11,16 +11,16 @@ import sys
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from workflow.graph_workflow import create_flowforge_workflow, run_flowforge_workflow
+from src.workflow.graph_workflow import create_flowforge_workflow, run_flowforge_workflow
 
 
 class TestFlowForgeWorkflowIntegration(unittest.TestCase):
     """Integration tests for the complete FlowForge workflow."""
     
-    @patch('src.workflow.langgraph_flow.TimeAgent')
-    @patch('src.workflow.langgraph_flow.PlanAgent')
-    @patch('src.workflow.langgraph_flow.ImageGeneratorAgent')
-    @patch('src.workflow.langgraph_flow.ValidatorAgent')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
     def test_workflow_execution_success(self, mock_validator, mock_image, mock_plan, mock_time):
         """Test successful end-to-end workflow execution."""
         # Setup mocks to simulate successful execution
@@ -73,7 +73,7 @@ class TestFlowForgeWorkflowIntegration(unittest.TestCase):
         mock_image_instance.execute.assert_called_once()
         mock_validator_instance.execute.assert_called_once()
     
-    @patch('src.workflow.langgraph_flow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeAgent')
     def test_workflow_execution_time_agent_failure(self, mock_time):
         """Test workflow execution when time agent fails."""
         # Setup mock to simulate failure
@@ -96,8 +96,8 @@ class TestFlowForgeWorkflowIntegration(unittest.TestCase):
         # Verify only time agent was called
         mock_time_instance.execute.assert_called_once()
     
-    @patch('src.workflow.langgraph_flow.TimeAgent')
-    @patch('src.workflow.langgraph_flow.PlanAgent')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
     def test_workflow_execution_plan_agent_failure(self, mock_plan, mock_time):
         """Test workflow execution when plan agent fails."""
         # Setup mocks
@@ -130,10 +130,10 @@ class TestFlowForgeWorkflowIntegration(unittest.TestCase):
     
     def test_create_workflow_returns_object(self):
         """Test that create_workflow returns a workflow object."""
-        with patch('src.workflow.langgraph_flow.TimeAgent'), \
-             patch('src.workflow.langgraph_flow.PlanAgent'), \
-             patch('src.workflow.langgraph_flow.ImageGeneratorAgent'), \
-             patch('src.workflow.langgraph_flow.ValidatorAgent'):
+        with patch('src.workflow.graph_workflow.TimeAgent'), \
+             patch('src.workflow.graph_workflow.PlanAgent'), \
+             patch('src.workflow.graph_workflow.ImageGeneratorAgent'), \
+             patch('src.workflow.graph_workflow.ValidatorAgent'):
             
             workflow = create_flowforge_workflow()
             self.assertIsNotNone(workflow)

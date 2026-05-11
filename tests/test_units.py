@@ -11,7 +11,7 @@ from src.agents.time_agent import TimeAgent
 from src.agents.plan_agent import PlanAgent
 from src.agents.image_generator_agent import ImageGeneratorAgent
 from src.agents.validator_agent import ValidatorAgent
-from workflow.graph_workflow import create_flowforge_workflow, run_flowforge_workflow
+from src.workflow.graph_workflow import create_flowforge_workflow, run_flowforge_workflow
 
 
 class TestBaseAgent(unittest.TestCase):
@@ -165,10 +165,10 @@ class TestValidatorAgent(unittest.TestCase):
 class TestWorkflow(unittest.TestCase):
     """Test cases for the workflow."""
     
-    @patch('src.workflow.langgraph_flow.TimeAgent')
-    @patch('src.workflow.langgraph_flow.PlanAgent')
-    @patch('src.workflow.langgraph_flow.ImageGeneratorAgent')
-    @patch('src.workflow.langgraph_flow.ValidatorAgent')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
     def test_create_workflow(self, mock_validator, mock_image, mock_plan, mock_time):
         """Test workflow creation."""
         # Setup mocks
