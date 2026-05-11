@@ -123,6 +123,7 @@ async def generate_diagrams(
 async def health_check(hf_token: str = Depends(get_hf_token)) -> APIResponse:
     """Health check endpoint."""
     logger.info("Health check requested")
+
     try:
         return APIResponse(
             success=True,
