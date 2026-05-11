@@ -2,7 +2,7 @@
 from typing import Any
 
 from langchain.chains.router import LLMRouterChain
-from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
+from langchain_huggingface import HuggingFaceEndpoint
 from langchain.prompts import PromptTemplate
 
 from src.logger import setup_logger
