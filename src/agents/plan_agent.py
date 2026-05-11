@@ -1,18 +1,35 @@
-"""Plan Agent for FlowForge."""
+"""Plan Agent for FlowForge - generates detailed project plans from timelines."""
 
 from typing import Any
 
 from langchain.prompts import PromptTemplate
-from langchain_community.llms.huggingface_endpoint import (
-    HuggingFaceEndpoint,
-)
+from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
 
 
 class PlanAgent(BaseAgent):
-    """Generate detailed project plans from timetables."""
+    """Generate detailed project plans from timelines with resource allocation and risk analysis."""
+
+    PLAN_SYSTEM_PROMPT = """You are an expert project manager and strategic planner
+with deep experience in software engineering projects. You create comprehensive,
+actionable project plans that account for resources, risks, dependencies,
+and quality assurance.
+
+Your plans must be:
+- Realistic and achievable within the given timeline
+- Resource-efficient with clear role assignments
+- Risk-aware with mitigation strategies
+- Quality-focused with explicit QA procedures
+- Communication-rich with clear reporting structures
+
+For each task, consider:
+- Effort estimation in hours/days
+- Required skills and team members
+- Dependencies on other tasks
+- Risk level and mitigation approach
+- Definition of done"""
 
     def __init__(self) -> None:
         """Initialize the plan agent."""
@@ -30,17 +47,105 @@ class PlanAgent(BaseAgent):
         ValueError
             If HF_TOKEN is missing.
         """
-        hf_token = Config.HF_TOKEN
-
-        if not hf_token:
+        if not Config.HF_TOKEN:
             raise ValueError("HF_TOKEN must be set.")
 
         self.llm = HuggingFaceEndpoint(
             repo_id="deepseek-ai/DeepSeek-R1",
             task="text-generation",
-            max_new_tokens=1024,
-            temperature=0.6,
-            huggingfacehub_api_token=hf_token,
+            max_new_tokens=2048,
+            temperature=0.5,
+            top_p=0.9,
+            huggingfacehub_api_token=Config.HF_TOKEN,
+        )
+
+    def _build_plan_prompt(
+        self,
+        timetable: str,
+        proposal_context: str = "",
+        team_size: int = 5,
+        priority: str = "medium",
+    ) -> str:
+        """Build a structured plan prompt from timetable."""
+
+        priority_instructions = {
+            "low": "Relaxed pace with thorough documentation.",
+            "medium": "Balanced pace with good coverage of all aspects.",
+            "high": "Aggressive timeline with focus on MVP delivery.",
+            "critical": "Maximum urgency, prioritize critical path items.",
+        }.get(priority, "Balanced pace.")
+
+        template = PromptTemplate(
+            input_variables=[
+                "timetable",
+                "proposal_context",
+                "team_size",
+                "priority_instructions",
+            ],
+            template="""
+{system_prompt}
+
+Priority Level Context: {priority_instructions}
+Team Size: {team_size} members
+
+Timeline Reference:
+{proposal_context}
+
+Detailed Timetable:
+{timetable}
+
+Generate a comprehensive project plan with the following sections:
+
+## 1. Task Breakdown
+Break down all deliverables into atomic tasks with:
+- Task name
+- Owner/role
+- Estimated effort (hours)
+- Priority (P0/P1/P2/P3)
+- Status tracking fields
+
+## 2. Resource Allocation
+- Map tasks to team roles ({team_size} members)
+- Identify skill requirements per task
+- Flag resource bottlenecks and overload risks
+- Suggest hiring/contractor needs if gaps exist
+
+## 3. Risk Mitigation
+- Identify top 10 risks with probability and impact scores
+- Define mitigation strategies for each risk
+- Create contingency plans for critical risks
+- Specify risk owners
+
+## 4. Communication Structure
+- Define reporting cadence (daily standups, weekly reviews)
+- Specify stakeholder update frequency
+- Define escalation paths
+- Document decision-making authority
+
+## 5. QA Procedures
+- Define testing strategy (unit, integration, E2E, performance)
+- Code review requirements
+- Acceptance criteria per milestone
+- Security review checkpoints
+
+## 6. Budget Estimation
+- Break down costs by phase
+- Include personnel, infrastructure, tooling, and contingency
+- Provide total estimate with confidence range
+
+Be thorough and realistic in all estimates.""".format(
+                system_prompt=self.PLAN_SYSTEM_PROMPT,
+                timetable=timetable,
+                proposal_context=proposal_context,
+                team_size=team_size,
+                priority_instructions=priority_instructions,
+            ),
+        )
+        return template.format(
+            timetable=timetable,
+            proposal_context=proposal_context,
+            team_size=team_size,
+            priority_instructions=priority_instructions,
         )
 
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -50,15 +155,18 @@ class PlanAgent(BaseAgent):
         Parameters
         ----------
         state : dict[str, Any]
-            Workflow state containing timetable.
+            Workflow state containing timetable and project context.
 
         Returns
         -------
         dict[str, Any]
-            Updated workflow state.
+            Updated workflow state with detailed plan.
         """
         try:
             timetable = state.get("timetable", "")
+            proposal = state.get("proposal", state.get("prompt", ""))
+            team_size = state.get("team_size", 5)
+            priority = state.get("priority", "medium")
 
             if not timetable:
                 return self._update_state(
@@ -70,62 +178,36 @@ class PlanAgent(BaseAgent):
                     },
                 )
 
-            self.logger.info(
-                "Generating detailed project plan."
+            self.logger.info("Generating detailed project plan.")
+
+            formatted_prompt = self._build_plan_prompt(
+                timetable=timetable,
+                proposal_context=proposal,
+                team_size=team_size,
+                priority=priority,
             )
 
-            plan_template = """
-            You are a detailed project planner.
-
-            Create a comprehensive project plan
-            from the following timetable.
-
-            Include:
-
-            1. Task breakdown
-            2. Resource allocation
-            3. Risk mitigation
-            4. Communication structure
-            5. QA procedures
-            6. Budget estimation
-
-            Timetable:
-            {timetable}
-            """
-
-            prompt_template = PromptTemplate(
-                input_variables=["timetable"],
-                template=plan_template,
+            response = self.llm.invoke(formatted_prompt)
+            plan = (
+                response.content.strip()
+                if hasattr(response, "content")
+                else str(response).strip()
             )
 
-            formatted_prompt = prompt_template.format(
-                timetable=timetable
-            )
-
-            plan = self.llm.invoke(formatted_prompt)
-
-            self.logger.info(
-                "Plan generated successfully."
-            )
+            self.logger.info("Plan generated successfully.")
 
             return self._update_state(
                 state,
                 {
-                    "plan": plan.strip(),
+                    "plan": plan,
                     "error": None,
                     "current_agent": "plan_agent",
                 },
             )
 
         except Exception as exc:
-            error_msg = (
-                f"Plan agent failed: {exc}"
-            )
-
-            self.logger.error(
-                error_msg,
-                exc_info=True,
-            )
+            error_msg = f"Plan agent failed: {exc}"
+            self.logger.error(error_msg, exc_info=True)
 
             return self._update_state(
                 state,
@@ -135,4 +217,3 @@ class PlanAgent(BaseAgent):
                     "current_agent": "plan_agent",
                 },
             )
-        
