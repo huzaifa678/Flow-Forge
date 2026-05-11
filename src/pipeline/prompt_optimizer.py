@@ -5,7 +5,10 @@ from langchain.chains.router import LLMRouterChain
 from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
 from langchain.prompts import PromptTemplate
 
+from src.logger import setup_logger
 from src.config import Config
+
+logger = setup_logger()
 
 
 class PromptOptimizer:
