@@ -11,7 +11,7 @@ import sys
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from workflow.workflow import create_flowforge_workflow, run_flowforge_workflow
+from workflow.graph_workflow import create_flowforge_workflow, run_flowforge_workflow
 
 
 class TestFlowForgeWorkflowIntegration(unittest.TestCase):
