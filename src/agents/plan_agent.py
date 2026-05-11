@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_huggingface import HuggingFaceEndpoint
 
 from src.agents.base_agent import BaseAgent
