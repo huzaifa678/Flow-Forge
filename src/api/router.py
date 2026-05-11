@@ -10,6 +10,7 @@ from src.schemas.response import (
 )
 from src.workflow.graph_workflow import run_flowforge_workflow
 
+
 router = APIRouter(prefix="/api/v1", tags=["FlowForge"])
 
 
@@ -102,77 +103,7 @@ async def generate_diagrams(
             status_code=500,
             detail=f"Workflow execution failed: {str(exc)}",
         )
-
-
-@router.post(
-    "/timeline",
-    response_model=APIResponse,
-    responses={
-        200: {"description": "Timeline generated successfully"},
-        400: {"description": "Invalid request data", "model": APIResponse},
-        500: {"description": "Server error", "model": APIResponse},
-    },
-    summary="Generate project timeline",
-    description="Generate project milestones, parallel work streams, and Gantt chart from a proposal.",
-)
-async def generate_timeline(
-    request: DiagramGenerationRequest,
-    hf_token: str = Depends(get_hf_token),
-) -> APIResponse:
-    """
-    Run only the Timeline Agent to generate project milestones and Gantt chart.
-
-    This is useful when you only need the timeline without the full pipeline.
-    """
-    try:
-        proposal_data = request.proposal
-
-        proposal_text = f"Project: {proposal_data.title}\n\n{proposal_data.description}"
-        if proposal_data.requirements:
-            proposal_text += (
-                "\n\nRequirements:\n"
-                + "\n".join(f"  {i+1}. {r}" for i, r in enumerate(proposal_data.requirements))
-            )
-
-        from src.agents.time_agent import TimeAgent
-
-        time_agent = TimeAgent()
-        state = {
-            "proposal": proposal_text,
-            "project_title": proposal_data.title,
-            "timeline_weeks": proposal_data.timeline_weeks,
-            "team_size": proposal_data.team_size,
-            "tech_stack": proposal_data.tech_stack or [],
-            "include_gantt": request.prompt.include_gantt,
-            "include_parallel_work": request.prompt.include_parallel_work,
-        }
-
-        result = time_agent.execute(state)
-
-        if result.get("error"):
-            return APIResponse(
-                success=False,
-                message="Timeline generation failed",
-                data={"error": result["error"]},
-            )
-
-        return APIResponse(
-            success=True,
-            message="Timeline generated successfully",
-            data={
-                "timetable": result.get("timetable"),
-                "milestones": result.get("milestones", []),
-                "parallel_work_streams": result.get("parallel_work_streams", []),
-            },
-        )
-
-    except Exception as exc:
-        return APIResponse(
-            success=False,
-            message="Timeline generation failed",
-            data={"error": str(exc)},
-        )
-
+    
 
 @router.get(
     "/health",

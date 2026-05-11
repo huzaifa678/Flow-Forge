@@ -4,6 +4,8 @@ from unittest.mock import Mock, patch, MagicMock
 import os
 import sys
 
+from src.schema.helpers import format_workflow_response
+
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'FlowForge'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -177,6 +179,130 @@ class TestFlowForgeWorkflowIntegration(unittest.TestCase):
 
             workflow = create_flowforge_workflow()
             self.assertIsNotNone(workflow)
+
+    def test_format_workflow_response_success(self):
+        """Test formatting a successful workflow result."""
+        raw_result = {
+            "proposal_summary": "Test project",
+            "optimized_prompt": "Optimized prompt",
+            "timetable": "gantt\ntitle Test\nsection A\nTask :a1, 2026-05-10, 5d",
+            "milestones": ["Phase 1", "Phase 2"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+            "plan": "Detailed plan",
+            "diagrams": [
+                {
+                    "diagram_type": "workflow",
+                    "mermaid_code": "flowchart TD\n    A --> B",
+                    "is_valid": True,
+                    "title": "Workflow",
+                }
+            ],
+            "diagram_count": 1,
+            "valid_diagram_count": 1,
+            "validation_results": [{"is_valid": True}],
+            "overall_validation": True,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = format_workflow_response(raw_result)
+
+        self.assertEqual(response.status, "success")
+        self.assertEqual(response.valid_diagram_count, 1)
+        self.assertEqual(response.total_diagram_count, 1)
+        self.assertTrue(response.overall_validation)
+
+    def test_format_workflow_response_partial(self):
+        """Test formatting a partial workflow result (some diagrams invalid)."""
+        raw_result = {
+            "proposal_summary": "Test project",
+            "diagrams": [
+                {"diagram_type": "workflow", "is_valid": True},
+                {"diagram_type": "ci_cd", "is_valid": False},
+            ],
+            "diagram_count": 2,
+            "valid_diagram_count": 1,
+            "overall_validation": False,
+            "error": None,
+        }
+
+        response = format_workflow_response(raw_result)
+        self.assertEqual(response.status, "partial")
+
+    def test_format_workflow_response_failed(self):
+        """Test formatting a failed workflow result."""
+        raw_result = {
+            "proposal_summary": "Test project",
+            "diagrams": [],
+            "diagram_count": 0,
+            "valid_diagram_count": 0,
+            "error": "Something went wrong",
+        }
+
+        response = format_workflow_response(raw_result)
+        self.assertEqual(response.status, "failed")
+        self.assertEqual(response.error, "Something went wrong")
+
+
+class TestPromptOptimization(unittest.TestCase):
+    """Integration tests for prompt optimization in workflow."""
+
+    @patch('src.workflow.graph_workflow.PromptOptimizer')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    def test_workflow_with_optimization(self, mock_time, mock_optimizer_cls):
+        """Test that workflow applies prompt optimization when enabled."""
+        mock_optimizer_instance = Mock()
+        mock_optimizer_instance.optimize.return_value = {
+            "original_prompt": "Create a web app",
+            "optimized_prompt": "Optimized: Create a web application with...",
+            "optimization_technique": "langchain_llm_router",
+        }
+        mock_optimizer_cls.return_value = mock_optimizer_instance
+
+        mock_time_instance = Mock()
+        mock_time_instance.execute.return_value = {
+            "timetable": "Phase 1: Design",
+            "milestones": [],
+            "parallel_work_streams": [],
+            "error": None,
+        }
+        mock_time.return_value = mock_time_instance
+
+        from src.workflow.graph_workflow import run_flowforge_workflow
+
+        result = run_flowforge_workflow(
+            proposal="Create a web app",
+            prompt="Create a web app",
+            hf_token="test-token",
+            optimize_prompt=True,
+        )
+
+        # Verify optimization was called
+        mock_optimizer_instance.optimize.assert_called_once_with("Create a web app")
+
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    def test_workflow_without_optimization(self, mock_time):
+        """Test that workflow skips optimization when disabled."""
+        mock_time_instance = Mock()
+        mock_time_instance.execute.return_value = {
+            "timetable": "Phase 1: Design",
+            "milestones": [],
+            "parallel_work_streams": [],
+            "error": None,
+        }
+        mock_time.return_value = mock_time_instance
+
+        from src.workflow.graph_workflow import run_flowforge_workflow
+
+        result = run_flowforge_workflow(
+            proposal="Create a web app",
+            prompt="Create a web app",
+            hf_token="test-token",
+            optimize_prompt=False,
+        )
+
+        # Should still work without optimization
+        self.assertIn("timetable", result)
 
 
 if __name__ == '__main__':
