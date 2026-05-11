@@ -158,7 +158,7 @@ def create_flowforge_workflow() -> StateGraph:
         },
     )
 
-    return workflow.compile()
+    return workflow
 
 
 # Module-level optimizer instance (lazy-initialized)
@@ -223,7 +223,7 @@ def run_flowforge_workflow(
             )
 
     # Build the initial workflow state
-    workflow = create_flowforge_workflow()
+    workflow = create_flowforge_workflow().compile()
 
     initial_state = FlowForgeState(
         proposal=proposal,
