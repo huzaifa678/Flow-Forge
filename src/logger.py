@@ -1,10 +1,7 @@
 import logging
 
 def setup_logger() -> logging.Logger:
-    """
-    Configure and return application logger.
-    """
-
+    """Configure and return application logger."""
     logger = logging.getLogger("app")
     logger.setLevel(logging.INFO)
 
