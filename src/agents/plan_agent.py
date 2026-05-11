@@ -61,15 +61,13 @@ class PlanAgent(BaseAgent):
             timetable = state.get("timetable", "")
 
             if not timetable:
-                error_msg = (
-                    "No timetable provided for plan agent."
-                )
-
-                self.logger.error(error_msg)
-
                 return self._update_state(
                     state,
-                    {"error": error_msg},
+                    {
+                        "error": "No timetable provided for plan agent.",
+                        "plan": None,
+                        "current_agent": "plan_agent",
+                    },
                 )
 
             self.logger.info(
@@ -115,6 +113,7 @@ class PlanAgent(BaseAgent):
                 {
                     "plan": plan.strip(),
                     "error": None,
+                    "current_agent": "plan_agent",
                 },
             )
 
@@ -130,6 +129,10 @@ class PlanAgent(BaseAgent):
 
             return self._update_state(
                 state,
-                {"error": error_msg},
+                {
+                    "error": "Failed to generate plan",
+                    "plan": None,
+                    "current_agent": "plan_agent",
+                },
             )
         

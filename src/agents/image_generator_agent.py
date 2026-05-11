@@ -101,15 +101,17 @@ Rules:
                     state,
                     {
                         "error": "No Mermaid diagram provided.",
-                        "diagram": None,
+                        "mermaid_diagram": None,
+                        "current_agent": "image_agent",
                     },
                 )
 
             return self._update_state(
                 state,
                 {
-                    "diagram": diagram,   
+                    "mermaid_diagram": diagram,   
                     "error": None,
+                    "current_agent": "image_agent",
                 },
             )
 
@@ -117,8 +119,9 @@ Rules:
             return self._update_state(
                 state,
                 {
-                    "error": f"Failed to generate image: {exc}",
-                    "diagram": None,
+                    "error": "No Mermaid diagram provided.",
+                    "mermaid_diagram": None,
+                    "current_agent": "image_agent",
                 },
             )
         

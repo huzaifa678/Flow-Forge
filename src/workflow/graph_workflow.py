@@ -27,6 +27,18 @@ class FlowForgeState(TypedDict):
     current_agent: Optional[str]
     error: Optional[str]
 
+def route_time(state):
+        return "plan_agent" if not state.get("error") else "end"
+
+def route_plan(state):
+    return "image_agent" if not state.get("error") else "end"
+
+def route_image(state):
+    return "validator_agent" if not state.get("error") else "end"
+
+def route_validator(state):
+    return "end" if not state.get("error") else "end"
+
 
 def create_flowforge_workflow() -> StateGraph:
     """
@@ -45,56 +57,52 @@ def create_flowforge_workflow() -> StateGraph:
     # Define the workflow
     workflow = StateGraph(FlowForgeState)
     
-    # Add nodes (agents)
     workflow.add_node("time_agent", time_agent.execute)
     workflow.add_node("plan_agent", plan_agent.execute)
     workflow.add_node("image_agent", image_agent.execute)
     workflow.add_node("validator_agent", validator_agent.execute)
-    
-    # Define the flow: TimeAgent -> PlanAgent -> ImageAgent -> ValidatorAgent -> END
+
     workflow.set_entry_point("time_agent")
-    workflow.add_edge("time_agent", "plan_agent")
-    workflow.add_edge("plan_agent", "image_agent")
-    workflow.add_edge("image_agent", "validator_agent")
-    workflow.add_edge("validator_agent", END)
-    
-    # Add conditional edges for error handling
+
+    # Time -> Plan or END
     workflow.add_conditional_edges(
         "time_agent",
-        lambda state: "error" if state.get("error") else "plan_agent",
+        route_time,
         {
             "plan_agent": "plan_agent",
-            "error": END
-        }
+            "end": END,
+        },
     )
-    
+
+    # Plan -> Image or END
     workflow.add_conditional_edges(
         "plan_agent",
-        lambda state: "error" if state.get("error") else "image_agent",
+        route_plan,
         {
             "image_agent": "image_agent",
-            "error": END
-        }
+            "end": END,
+        },
     )
-    
+
+    # Image -> Validator or END
     workflow.add_conditional_edges(
         "image_agent",
-        lambda state: "error" if state.get("error") else "validator_agent",
+        route_image,
         {
             "validator_agent": "validator_agent",
-            "error": END
-        }
+            "end": END,
+        },
     )
-    
+
+    # Validator -> END
     workflow.add_conditional_edges(
         "validator_agent",
-        lambda state: "error" if state.get("error") else "end",
+        route_validator,
         {
             "end": END,
-            "error": END
-        }
+        },
     )
-    
+
     return workflow.compile()
 
 
@@ -126,6 +134,8 @@ def run_flowforge_workflow(prompt: str, hf_token: str) -> FlowForgeState:
     
     # Execute the workflow
     final_state = workflow.invoke(initial_state)
+    final_state["current_agent"] = "validator_agent"
+    
     return final_state
 
 

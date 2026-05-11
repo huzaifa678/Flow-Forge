@@ -110,6 +110,7 @@ class TimeAgent(BaseAgent):
                 {
                     "timetable": timetable.strip(),
                     "error": None,
+                    "current_agent": "time_agent",
                 },
             )
 
@@ -125,6 +126,10 @@ class TimeAgent(BaseAgent):
 
             return self._update_state(
                 state,
-                {"error": error_msg},
+                {
+                    "error": "Failed to generate timetable",
+                    "timetable": None,
+                    "current_agent": "time_agent",
+                },
             )
         
