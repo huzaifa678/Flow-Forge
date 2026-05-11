@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.dependencies import get_hf_token
+from src.logger import setup_logger
 from src.schema.helpers import format_workflow_response
 from src.schemas.request import DiagramGenerationRequest
 from src.schemas.response import (
@@ -9,6 +10,8 @@ from src.schemas.response import (
     WorkflowCompleteResponse,
 )
 from src.workflow.graph_workflow import run_flowforge_workflow
+
+logger = setup_logger()
 
 
 router = APIRouter(prefix="/api/v1", tags=["FlowForge"])
@@ -48,6 +51,7 @@ async def generate_diagrams(
     - `prompt`: User's specific instructions and diagram type preferences
     - `hf_token`: HuggingFace API token (auto-injected from config)
     """
+    logger.info("Received diagram generation request for project: %s", request.proposal.title)
     try:
         proposal_data = request.proposal
         prompt_data = request.prompt
@@ -79,8 +83,10 @@ async def generate_diagrams(
             proposal_parts.append(f"\nBudget Range: {proposal_data.budget_range}")
 
         proposal_text = "\n".join(proposal_parts)
+        logger.debug("Built proposal text: %s", proposal_text[:200])  # Log first 200 chars
 
         # Run the complete workflow
+        logger.info("Starting FlowForge workflow execution")
         result = run_flowforge_workflow(
             proposal=proposal_text,
             prompt=prompt_data.user_prompt,
@@ -93,12 +99,15 @@ async def generate_diagrams(
             diagram_types=[dt.value for dt in prompt_data.diagram_types],
             optimize_prompt=prompt_data.optimize_prompt,
         )
+        logger.info("FlowForge workflow completed successfully")
 
         return format_workflow_response(result)
 
     except ValueError as exc:
+        logger.warning("Validation error in diagram generation request: %s", str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        logger.error("Unexpected error during diagram generation: %s", str(exc), exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Workflow execution failed: {str(exc)}",
@@ -113,8 +122,16 @@ async def generate_diagrams(
 )
 async def health_check(hf_token: str = Depends(get_hf_token)) -> APIResponse:
     """Health check endpoint."""
-    return APIResponse(
-        success=True,
-        message="FlowForge API is healthy",
-        data={"hf_token_configured": bool(hf_token)},
-    )
+    logger.info("Health check requested")
+    try:
+        return APIResponse(
+            success=True,
+            message="FlowForge API is healthy",
+            data={"hf_token_configured": bool(hf_token)},
+        )
+    except Exception as exc:
+        logger.error("Error in health check: %s", str(exc), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Health check failed: {str(exc)}",
+        )
