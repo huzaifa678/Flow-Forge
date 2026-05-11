@@ -3,7 +3,7 @@
 from typing import Any, Optional
 
 from langchain.prompts import PromptTemplate
-from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
+from langchain_huggingface import HuggingFaceEndpoint
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
