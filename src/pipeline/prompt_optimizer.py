@@ -1,7 +1,7 @@
 """Prompt optimization module using LangChain for FlowForge."""
 from typing import Any
 
-from langchain.chains.router import LLMRouterChain
+from langchain_core.runnables import RunnableSequence
 from langchain_huggingface import HuggingFaceEndpoint
 from langchain_core.prompts import PromptTemplate
 
@@ -40,7 +40,7 @@ class PromptOptimizer:
             logger.error(f"Failed to initialize LLM: {str(e)}")
             raise
 
-    def _build_optimizer_chain(self) -> LLMRouterChain:
+    def _build_optimizer_chain(self) -> RunnableSequence:
         """Build the main prompt optimization chain."""
         optimizer_template = """You are an expert prompt engineer. Optimize the following user prompt
 for use with an AI agent pipeline that generates project documentation and diagrams.
@@ -70,7 +70,7 @@ Optimized Prompt:"""
         )
         return prompt_template | self.llm
 
-    def _build_proposal_extractor(self) -> LLMRouterChain:
+    def _build_proposal_extractor(self) -> RunnableSequence:
         """Build chain to extract structured proposal from raw text."""
         extractor_template = """You are an expert at extracting structured project proposals from unstructured text.
 
@@ -100,7 +100,7 @@ Structured Proposal:"""
         )
         return prompt_template | self.llm
 
-    def _build_prompt_enhancer(self) -> LLMRouterChain:
+    def _build_prompt_enhancer(self) -> RunnableSequence:
         """Build chain to enhance prompts per diagram type."""
         enhancer_template = """You are a specialized prompt enhancer for diagram generation.
 
