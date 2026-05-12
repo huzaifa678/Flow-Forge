@@ -21,7 +21,6 @@ from src.schemas.request import (
 )
 
 
-
 class TestBaseAgent(unittest.TestCase):
     """Test cases for base agent functionality."""
 
@@ -33,19 +32,19 @@ class TestBaseAgent(unittest.TestCase):
 class TestPromptOptimizer(unittest.TestCase):
     """Test cases for PromptOptimizer module."""
 
-    @patch('src.pipeline.prompt_optimizer.HuggingFaceEndpoint')
+    @patch('src.pipeline.prompt_optimizer.InferenceClient')
     def test_initialization(self, mock_llm):
         """Test PromptOptimizer initialization."""
         optimizer = PromptOptimizer()
         self.assertIsNotNone(optimizer.llm)
         mock_llm.assert_called_once()
 
-    @patch('src.pipeline.prompt_optimizer.HuggingFaceEndpoint')
+    @patch('src.pipeline.prompt_optimizer.InferenceClient')
     def test_optimize_returns_structure(self, mock_llm):
         """Test optimize returns proper structure."""
         mock_instance = Mock()
-        mock_instance.invoke.return_value = MagicMock(
-            content="Optimized version of the prompt with more detail."
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Optimized version of the prompt with more detail."))]
         )
         mock_llm.return_value = mock_instance
 
@@ -57,13 +56,13 @@ class TestPromptOptimizer(unittest.TestCase):
         self.assertIn("optimization_technique", result)
         self.assertEqual(result["original_prompt"], "Create a web app")
 
-    @patch('src.pipeline.prompt_optimizer.HuggingFaceEndpoint')
+    @patch('src.pipeline.prompt_optimizer.InferenceClient')
     def test_extract_proposal_returns_dict(self, mock_llm):
         """Test extract_proposal returns dict."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = '{"title": "Test Project", "description": "A test project"}'
-        mock_instance.invoke.return_value = mock_result
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content='{"title": "Test Project", "description": "A test project"}'))]
+        )
         mock_llm.return_value = mock_instance
 
         optimizer = PromptOptimizer()
@@ -72,13 +71,13 @@ class TestPromptOptimizer(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertIn("title", result)
 
-    @patch('src.pipeline.prompt_optimizer.HuggingFaceEndpoint')
+    @patch('src.pipeline.prompt_optimizer.InferenceClient')
     def test_enhance_for_diagram(self, mock_llm):
         """Test enhance_for_diagram returns enhanced prompt."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = "Enhanced prompt for workflow diagram"
-        mock_instance.invoke.return_value = mock_result
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Enhanced prompt for workflow diagram"))]
+        )
         mock_llm.return_value = mock_instance
 
         optimizer = PromptOptimizer()
@@ -95,19 +94,20 @@ class TestPromptOptimizer(unittest.TestCase):
 class TestTimeAgent(unittest.TestCase):
     """Test cases for TimeAgent."""
 
-    @patch('src.agents.time_agent.HuggingFaceEndpoint')
+    @patch('src.agents.time_agent.InferenceClient')
     def test_initialization(self, mock_llm):
         """Test TimeAgent initialization."""
         agent = TimeAgent()
         self.assertEqual(agent.name, "time_agent")
         mock_llm.assert_called_once()
 
-    @patch('src.agents.time_agent.HuggingFaceEndpoint')
+    @patch('src.agents.time_agent.InferenceClient')
     def test_execute_success(self, mock_llm):
         """Test successful execution of TimeAgent."""
         mock_instance = Mock()
-        mock_instance.invoke.return_value = MagicMock(
-            content="""## 1. Project Phases & Milestones
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""## 1. Project Phases & Milestones
 - Phase 1: Design (2 weeks)
 - Phase 2: Development (4 weeks)
 
@@ -124,6 +124,7 @@ gantt
     section Development
     Backend :after a1, 14d
 ```"""
+            ))]
         )
         mock_llm.return_value = mock_instance
 
@@ -143,7 +144,7 @@ gantt
         self.assertIn("milestones", result)
         self.assertIn("parallel_work_streams", result)
 
-    @patch('src.agents.time_agent.HuggingFaceEndpoint')
+    @patch('src.agents.time_agent.InferenceClient')
     def test_execute_no_prompt(self, mock_llm):
         """Test TimeAgent execution with no prompt."""
         agent = TimeAgent()
@@ -157,11 +158,13 @@ gantt
         self.assertIsNotNone(result.get("error"))
         self.assertIn("No proposal", result["error"])
 
-    @patch('src.agents.time_agent.HuggingFaceEndpoint')
+    @patch('src.agents.time_agent.InferenceClient')
     def test_execute_uses_fallback_prompt(self, mock_llm):
         """Test TimeAgent falls back to 'prompt' key if no 'proposal'."""
         mock_instance = Mock()
-        mock_instance.invoke.return_value = MagicMock(content="Timetable content")
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Timetable content"))]
+        )
         mock_llm.return_value = mock_instance
 
         agent = TimeAgent()
@@ -176,19 +179,19 @@ gantt
 class TestPlanAgent(unittest.TestCase):
     """Test cases for PlanAgent."""
 
-    @patch('src.agents.plan_agent.HuggingFaceEndpoint')
+    @patch('src.agents.plan_agent.InferenceClient')
     def test_initialization(self, mock_llm):
         """Test PlanAgent initialization."""
         agent = PlanAgent()
         self.assertEqual(agent.name, "plan_agent")
         mock_llm.assert_called_once()
 
-    @patch('src.agents.plan_agent.HuggingFaceEndpoint')
+    @patch('src.agents.plan_agent.InferenceClient')
     def test_execute_success(self, mock_llm):
         """Test successful execution of PlanAgent."""
         mock_instance = Mock()
-        mock_instance.invoke.return_value = MagicMock(
-            content="Detailed plan with tasks and resources"
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="Detailed plan with tasks and resources"))]
         )
         mock_llm.return_value = mock_instance
 
@@ -210,25 +213,27 @@ class TestPlanAgent(unittest.TestCase):
 class TestImageGeneratorAgent(unittest.TestCase):
     """Test cases for ImageGeneratorAgent - now supporting multiple diagram types."""
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_initialization(self, mock_llm):
         """Test ImageGeneratorAgent initialization."""
         agent = ImageGeneratorAgent()
         self.assertEqual(agent.name, "image_agent")
         mock_llm.assert_called_once()
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_execute_success_multi_diagram(self, mock_llm):
         """Test successful execution generating multiple diagrams."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = """gantt
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""gantt
     title Test Gantt
     section Design
     Task1 :a1, 2026-05-10, 5d
     section Dev
     Task2 :after a1, 10d"""
-        mock_instance.invoke.return_value = mock_result
+            ))]
+        )
         mock_llm.return_value = mock_instance
 
         agent = ImageGeneratorAgent()
@@ -245,16 +250,18 @@ class TestImageGeneratorAgent(unittest.TestCase):
         self.assertIsNone(result.get("error"))
         self.assertEqual(result["current_agent"], "image_agent")
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_generate_diagram_workflow(self, mock_llm):
         """Test generating a single workflow diagram."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = """flowchart TD
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""flowchart TD
     A[Start] --> B{Decision}
     B -->|Yes| C[Do something]
     B -->|No| D[Do another thing]"""
-        mock_instance.invoke.return_value = mock_result
+            ))]
+        )
         mock_llm.return_value = mock_instance
 
         agent = ImageGeneratorAgent()
@@ -267,17 +274,19 @@ class TestImageGeneratorAgent(unittest.TestCase):
         self.assertEqual(result["diagram_type"], "workflow")
         self.assertIn("flowchart", result["mermaid_code"])
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_generate_diagram_system_design(self, mock_llm):
         """Test generating a system design diagram."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = """flowchart TD
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""flowchart TD
     Client --> API[API Gateway]
     API --> Auth[Auth Service]
     API --> Core[Core Service]
     Core --> DB[(Database)]"""
-        mock_instance.invoke.return_value = mock_result
+            ))]
+        )
         mock_llm.return_value = mock_instance
 
         agent = ImageGeneratorAgent()
@@ -289,7 +298,7 @@ class TestImageGeneratorAgent(unittest.TestCase):
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["diagram_type"], "system_design")
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_execute_no_plan(self, mock_llm):
         """Test ImageGeneratorAgent execution with no plan."""
         agent = ImageGeneratorAgent()
@@ -300,15 +309,13 @@ class TestImageGeneratorAgent(unittest.TestCase):
         self.assertEqual(result.get("diagram_count", 0), 0)
         self.assertIn("error", result)
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
-    def test_validate_diagram_invalid(self, mock_llm):
+    def test_validate_diagram_invalid(self):
         """Test that invalid diagrams are properly flagged."""
         agent = ImageGeneratorAgent()
         result = agent._validate_diagram("not a diagram")
         self.assertFalse(result)
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
-    def test_validate_diagram_valid(self, mock_llm):
+    def test_validate_diagram_valid(self):
         """Test that valid Mermaid diagrams pass validation."""
         agent = ImageGeneratorAgent()
         result = agent._validate_diagram("gantt\ntitle Test\nsection A\nTask :a1, 2026-05-10, 5d")
@@ -323,7 +330,7 @@ class TestImageGeneratorAgent(unittest.TestCase):
         self.assertEqual(DiagramType.ARCHITECTURE.value, "architecture")
         self.assertEqual(DiagramType.GANTT.value, "gantt")
 
-    @patch('src.agents.image_generator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.image_generator_agent.InferenceClient')
     def test_all_diagram_templates_exist(self, mock_llm):
         """Test that templates exist for all diagram types."""
         agent = ImageGeneratorAgent()
@@ -337,23 +344,25 @@ class TestImageGeneratorAgent(unittest.TestCase):
 class TestValidatorAgent(unittest.TestCase):
     """Test cases for ValidatorAgent - now validates all diagrams."""
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_initialization(self, mock_llm):
         """Test ValidatorAgent initialization."""
         agent = ValidatorAgent()
         self.assertEqual(agent.name, "validator_agent")
         mock_llm.assert_called_once()
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_execute_success_valid(self, mock_llm):
         """Test successful execution of ValidatorAgent with valid diagram."""
         mock_instance = Mock()
-        mock_instance.invoke.return_value = MagicMock(
-            content="""VALID: true
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""VALID: true
 CRITICAL_ISSUES: None
 WARNINGS: None
 SUGGESTIONS: None
 FEEDBACK: Diagram is well-formed and follows best practices."""
+            ))]
         )
         mock_llm.return_value = mock_instance
 
@@ -374,7 +383,7 @@ FEEDBACK: Diagram is well-formed and follows best practices."""
         self.assertIsNone(result.get("error"))
         self.assertEqual(result["current_agent"], "validator_agent")
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_execute_empty_diagrams(self, mock_llm):
         """Test ValidatorAgent with empty diagrams list."""
         agent = ValidatorAgent()
@@ -385,8 +394,7 @@ FEEDBACK: Diagram is well-formed and follows best practices."""
         self.assertIn("error", result)
         self.assertIn("No diagrams", result["error"])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
-    def test_basic_validation_passes(self, mock_llm):
+    def test_basic_validation_passes(self):
         """Test basic Mermaid validation passes for valid diagrams."""
         agent = ValidatorAgent()
         result = agent._basic_mermaid_validation(
@@ -394,28 +402,25 @@ FEEDBACK: Diagram is well-formed and follows best practices."""
         )
         self.assertTrue(result["is_valid"])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
-    def test_basic_validation_fails_empty(self, mock_llm):
+    def test_basic_validation_fails_empty(self):
         """Test basic Mermaid validation fails for empty input."""
         agent = ValidatorAgent()
         result = agent._basic_mermaid_validation("")
         self.assertFalse(result["is_valid"])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
-    def test_basic_validation_fails_no_mermaid(self, mock_llm):
+    def test_basic_validation_fails_no_mermaid(self):
         """Test basic Mermaid validation fails for non-Mermaid text."""
         agent = ValidatorAgent()
         result = agent._basic_mermaid_validation("This is just text")
         self.assertFalse(result["is_valid"])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
-    def test_basic_validation_fails_brackets(self, mock_llm):
+    def test_basic_validation_fails_brackets(self):
         """Test basic Mermaid validation fails for mismatched brackets."""
         agent = ValidatorAgent()
         result = agent._basic_mermaid_validation("gantt\ntitle [Unclosed")
         self.assertFalse(result["is_valid"])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_parse_validation_response(self, mock_llm):
         """Test parsing of LLM validation response."""
         agent = ValidatorAgent()
@@ -428,7 +433,7 @@ FEEDBACK: Overall the diagram is well-formed and logically consistent."""
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["feedback"], "Overall the diagram is well-formed and logically consistent.")
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_parse_validation_response_invalid(self, mock_llm):
         """Test parsing of invalid LLM validation response."""
         agent = ValidatorAgent()
@@ -441,17 +446,19 @@ FEEDBACK: The diagram has a circular reference."""
         self.assertFalse(result["is_valid"])
         self.assertIn("Circular dependency", result["critical_issues"][0])
 
-    @patch('src.agents.validator_agent.HuggingFaceEndpoint')
+    @patch('src.agents.validator_agent.InferenceClient')
     def test_legacy_diagram_support(self, mock_llm):
         """Test that validator supports legacy 'mermaid_diagram' field."""
         mock_instance = Mock()
-        mock_result = MagicMock()
-        mock_result.content = """VALID: true
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""VALID: true
 CRITICAL_ISSUES: None
 WARNINGS: None
 SUGGESTIONS: None
 FEEDBACK: Diagram is valid."""
-        mock_instance.invoke.return_value = mock_result
+            ))]
+        )
         mock_llm.return_value = mock_instance
 
         agent = ValidatorAgent()
@@ -514,45 +521,61 @@ class TestWorkflow(unittest.TestCase):
         mock_validator.assert_called_once()
 
     @patch('src.workflow.graph_workflow.TimeAgent')
-    def test_workflow_state_flow(self, mock_time):
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_workflow_state_flow(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time,
+    ):
         """Test that workflow state flows correctly through agents."""
-        mock_instance = Mock()
-        mock_instance.execute.side_effect = [
-            # Time agent
-            {
-                "timetable": "Phase 1: Design, Phase 2: Dev",
-                "milestones": ["Design complete", "Development complete"],
-                "parallel_work_streams": ["Frontend", "Backend"],
-                "error": None,
-            },
-            # Plan agent
-            {
-                "plan": "Task breakdown with resources",
-                "error": None,
-            },
-            # Image agent
-            {
-                "diagrams": [
-                    {
-                        "diagram_type": "workflow",
-                        "mermaid_code": "flowchart TD\n    A --> B",
-                        "is_valid": True,
-                    }
-                ],
-                "diagram_count": 1,
-                "valid_diagram_count": 1,
-                "error": None,
-            },
-            # Validator
-            {
-                "validation_results": [{"is_valid": True}],
-                "overall_validation": True,
-                "valid_count": 1,
-                "total_count": 1,
-                "error": None,
-            },
-        ]
-        mock_time.return_value = mock_instance
+
+        # -------------------------
+        # Time Agent mock
+        # -------------------------
+        time_instance = Mock()
+        time_instance.execute.return_value = {
+            "timetable": "Phase 1: Design, Phase 2: Dev",
+            "milestones": ["Design complete", "Development complete"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+            "error": None,
+        }
+        mock_time.return_value = time_instance
+
+        plan_instance = Mock()
+        plan_instance.execute.return_value = {
+            "plan": "Task breakdown with resources",
+            "error": None,
+        }
+        mock_plan.return_value = plan_instance
+
+        image_instance = Mock()
+        image_instance.execute.return_value = {
+            "diagrams": [
+                {
+                    "diagram_type": "workflow",
+                    "mermaid_code": "flowchart TD\n    A --> B",
+                    "is_valid": True,
+                }
+            ],
+            "diagram_count": 1,
+            "valid_diagram_count": 1,
+            "error": None,
+        }
+        mock_image.return_value = image_instance
+
+        validator_instance = Mock()
+        validator_instance.execute.return_value = {
+            "validation_results": [{"is_valid": True}],
+            "overall_validation": True,
+            "valid_count": 1,
+            "total_count": 1,
+            "error": None,
+        }
+        mock_validator.return_value = validator_instance
 
         from src.workflow.graph_workflow import run_flowforge_workflow
 
@@ -563,6 +586,9 @@ class TestWorkflow(unittest.TestCase):
             optimize_prompt=False,
         )
 
+        # -------------------------
+        # Assertions
+        # -------------------------
         self.assertIsNotNone(result)
         self.assertIn("diagrams", result)
         self.assertIn("overall_validation", result)

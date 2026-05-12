@@ -1,9 +1,11 @@
 """Image Generator Agent for FlowForge - supports multiple diagram types."""
 
+import time
 from typing import Any, Optional
 
-from langchain.prompts import PromptTemplate
-from langchain_huggingface import HuggingFaceEndpoint
+from huggingface_hub import InferenceClient
+from huggingface_hub.errors import HfHubHTTPError
+from langchain_core.prompts import PromptTemplate
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
@@ -102,7 +104,7 @@ class ImageGeneratorAgent(BaseAgent):
     def __init__(self) -> None:
         """Initialize the image generator agent."""
         super().__init__("image_agent")
-        self.llm: Optional[HuggingFaceEndpoint] = None
+        self.llm: Optional[InferenceClient] = None
         self._initialize_llm()
 
     def _initialize_llm(self) -> None:
@@ -110,12 +112,9 @@ class ImageGeneratorAgent(BaseAgent):
         if not Config.HF_TOKEN:
             raise ValueError("HF_TOKEN must be set.")
 
-        self.llm = HuggingFaceEndpoint(
-            repo_id="deepseek-ai/DeepSeek-R1",
-            task="text-generation",
-            max_new_tokens=1200,
-            temperature=0.3,
-            huggingfacehub_api_token=Config.HF_TOKEN,
+        self.llm = InferenceClient(
+            model="Qwen/Qwen2.5-Coder-32B-Instruct",
+            token=Config.HF_TOKEN,
         )
 
     def _extract_text(self, response: Any) -> str:
@@ -229,8 +228,15 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
                 }
 
             prompt = self._build_diagram_prompt(plan, diagram_type, timeline)
-            response = self.llm.invoke(prompt)
-            diagram = self._parse_diagram(response)
+            response = self._chat_completion_with_retry(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+            )
+            diagram = self._parse_diagram(
+                response.choices[0].message.content
+                if hasattr(response, "choices")
+                else str(response)
+            )
 
             if not self._validate_diagram(diagram):
                 return {
@@ -264,6 +270,47 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
                 "error": f"Failed to generate {diagram_type.value} diagram: {exc}",
             }
 
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        """Check if an exception is retryable (timeout, server errors, etc.)."""
+        if isinstance(exc, HfHubHTTPError):
+            response = getattr(exc, "response", None)
+            if response:
+                status_code = getattr(response, "status_code", None)
+                return status_code in (408, 429, 500, 502, 503, 504)
+        return isinstance(exc, (TimeoutError, ConnectionError))
+
+    def _chat_completion_with_retry(
+        self, messages: list, max_tokens: int
+    ) -> Any:
+        """Execute chat completion with retry logic for transient failures."""
+        last_exception = None
+        max_attempts = 3
+        base_delay = 1.0
+
+        for attempt in range(max_attempts):
+            try:
+                response = self.llm.chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+                return response
+            except Exception as exc:
+                last_exception = exc
+                if not self._is_retryable_error(exc):
+                    raise exc
+                if attempt < max_attempts - 1:
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+
+        raise last_exception
+
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
         """
         Generate all requested Mermaid diagrams from plan.
@@ -283,6 +330,7 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
             timeline = state.get("timetable")
             diagram_types_raw = state.get("diagram_types", [DiagramType.WORKFLOW])
 
+            self.logger.info("plan: %s", plan[:100] if plan else "None")
             if not plan:
                 return self._update_state(
                     state,

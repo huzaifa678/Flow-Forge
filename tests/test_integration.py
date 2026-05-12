@@ -192,10 +192,8 @@ class TestAPIEndpointsIntegration(unittest.TestCase):
             },
         )
 
-        # The router catches exceptions and returns 500 for unexpected errors
-        # from run_flowforge_workflow. Since we return a dict with error (not raising),
-        # format_workflow_response will be called and status will be "failed".
-        self.assertEqual(response.status_code, 200)
+        # The router returns 500 when workflow fails and no diagrams are produced
+        self.assertEqual(response.status_code, 500)
         data = response.json()
         self.assertEqual(data["status"], "failed")
         self.assertEqual(data["error"], "Time agent failed: LLM connection timeout")

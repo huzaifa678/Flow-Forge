@@ -1,9 +1,7 @@
-"""Prompt optimization module using LangChain for FlowForge."""
+"""Prompt optimization module using InferenceClient for FlowForge."""
 from typing import Any
 
-from langchain.chains.router import LLMRouterChain
-from langchain_huggingface import HuggingFaceEndpoint
-from langchain.prompts import PromptTemplate
+from huggingface_hub import InferenceClient
 
 from src.logger import setup_logger
 from src.config import Config
@@ -12,37 +10,9 @@ logger = setup_logger()
 
 
 class PromptOptimizer:
-    """Optimize user prompts for better agent performance using LangChain."""
+    """Optimize user prompts for better agent performance using InferenceClient."""
 
-    def __init__(self) -> None:
-        """Initialize the prompt optimizer with LLM router chains."""
-        logger.debug("Initializing PromptOptimizer...")
-        self.llm = self._initialize_llm()
-        self._optimizer_chain = self._build_optimizer_chain()
-        self._proposal_extractor_chain = self._build_proposal_extractor()
-        self._prompt_enhancer_chain = self._build_prompt_enhancer()
-        logger.info("PromptOptimizer initialized successfully")
-
-    def _initialize_llm(self) -> HuggingFaceEndpoint:
-        """Initialize HuggingFace LLM for prompt optimization."""
-        logger.debug("Initializing HuggingFace LLM endpoint...")
-        try:
-            llm = HuggingFaceEndpoint(
-                repo_id="Qwen/Qwen2.5-Coder-32B-Instruct",
-                task="text-generation",
-                max_new_tokens=512,
-                temperature=0.5,
-                huggingfacehub_api_token=Config.HF_TOKEN,
-            )
-            logger.debug("HuggingFace LLM endpoint initialized successfully")
-            return llm
-        except Exception as e:
-            logger.error(f"Failed to initialize LLM: {str(e)}")
-            raise
-
-    def _build_optimizer_chain(self) -> LLMRouterChain:
-        """Build the main prompt optimization chain."""
-        optimizer_template = """You are an expert prompt engineer. Optimize the following user prompt
+    OPTIMIZER_TEMPLATE = """You are an expert prompt engineer. Optimize the following user prompt
 for use with an AI agent pipeline that generates project documentation and diagrams.
 
 The pipeline has these stages:
@@ -64,15 +34,7 @@ User Prompt:
 
 Optimized Prompt:"""
 
-        prompt_template = PromptTemplate(
-            input_variables=["user_prompt"],
-            template=optimizer_template,
-        )
-        return prompt_template | self.llm
-
-    def _build_proposal_extractor(self) -> LLMRouterChain:
-        """Build chain to extract structured proposal from raw text."""
-        extractor_template = """You are an expert at extracting structured project proposals from unstructured text.
+    EXTRACTOR_TEMPLATE = """You are an expert at extracting structured project proposals from unstructured text.
 
 Extract the following fields from the user's input and return them in the exact JSON format:
 
@@ -94,15 +56,7 @@ User Input:
 
 Structured Proposal:"""
 
-        prompt_template = PromptTemplate(
-            input_variables=["user_input"],
-            template=extractor_template,
-        )
-        return prompt_template | self.llm
-
-    def _build_prompt_enhancer(self) -> LLMRouterChain:
-        """Build chain to enhance prompts per diagram type."""
-        enhancer_template = """You are a specialized prompt enhancer for diagram generation.
+    ENHANCER_TEMPLATE = """You are a specialized prompt enhancer for diagram generation.
 
 Enhance the following prompt specifically for generating a {diagram_type} diagram.
 
@@ -120,11 +74,37 @@ Original Prompt:
 
 Enhanced Prompt for {diagram_type}:"""
 
-        prompt_template = PromptTemplate(
-            input_variables=["diagram_type", "plan", "user_prompt"],
-            template=enhancer_template,
+    def __init__(self) -> None:
+        """Initialize the prompt optimizer with LLM."""
+        logger.debug("Initializing PromptOptimizer...")
+        self.llm = self._initialize_llm()
+        logger.info("PromptOptimizer initialized successfully")
+
+    def _initialize_llm(self) -> InferenceClient:
+        """Initialize HuggingFace LLM for prompt optimization."""
+        logger.debug("Initializing HuggingFace LLM endpoint...")
+        try:
+            llm = InferenceClient(
+                model="Qwen/Qwen2.5-Coder-32B-Instruct",
+                token=Config.HF_TOKEN,
+            )
+            logger.debug("HuggingFace LLM endpoint initialized successfully")
+            return llm
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM: {str(e)}")
+            raise
+
+    def _chat_complete(self, prompt: str, max_tokens: int = 512) -> str:
+        """Helper method to call chat_completion and extract text."""
+        response = self.llm.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
         )
-        return prompt_template | self.llm
+        return (
+            response.choices[0].message.content
+            if hasattr(response, "choices")
+            else str(response)
+        )
 
     def optimize(self, user_prompt: str) -> dict[str, Any]:
         """
@@ -138,15 +118,15 @@ Enhanced Prompt for {diagram_type}:"""
         """
         logger.info(f"Starting prompt optimization for input: {user_prompt[:50]}...")
         try:
-            optimized = self._optimizer_chain.invoke({"user_prompt": user_prompt})
-            optimized_text = (
-                optimized.content if hasattr(optimized, "content") else str(optimized)
+            formatted_prompt = self.OPTIMIZER_TEMPLATE.format(
+                user_prompt=user_prompt
             )
+            optimized_text = self._chat_complete(formatted_prompt, max_tokens=512)
             logger.info("Prompt optimization completed successfully")
             return {
                 "original_prompt": user_prompt,
                 "optimized_prompt": optimized_text.strip(),
-                "optimization_technique": "langchain_llm_router",
+                "optimization_technique": "inference_client",
             }
         except Exception as e:
             logger.error(f"Prompt optimization failed: {str(e)}")
@@ -163,21 +143,12 @@ Enhanced Prompt for {diagram_type}:"""
             Dict containing structured proposal fields.
         """
         logger.info(f"Starting proposal extraction for input: {raw_input[:50]}...")
+        import json
+        import re
+
         try:
-            result = self._proposal_extractor_chain.invoke({"user_input": raw_input})
-            if isinstance(result, str):
-                result_text = result
-            else:
-                content = getattr(result, "content", None)
-
-            if isinstance(content, str):
-                result_text = content
-            else:
-                result_text = str(result)
-
-            # Parse the JSON from the response
-            import re
-            import json
+            formatted_prompt = self.EXTRACTOR_TEMPLATE.format(user_input=raw_input)
+            result_text = self._chat_complete(formatted_prompt, max_tokens=512)
 
             json_match = re.search(r"```json\s*\n(.*?)\n```", result_text, re.DOTALL)
             if json_match:
@@ -188,7 +159,6 @@ Enhanced Prompt for {diagram_type}:"""
                 except json.JSONDecodeError as e:
                     logger.warning(f"Failed to parse JSON from extractor response: {str(e)}")
 
-            # Fallback: return raw text structured minimally
             logger.info("Using fallback proposal structure")
             return {
                 "title": raw_input[:100],
@@ -223,24 +193,12 @@ Enhanced Prompt for {diagram_type}:"""
         """
         logger.info(f"Enhancing prompt for diagram type: {diagram_type}")
         try:
-            result = self._prompt_enhancer_chain.invoke(
-                {
-                    "diagram_type": diagram_type,
-                    "plan": plan,
-                    "user_prompt": user_prompt,
-                }
+            formatted_prompt = self.ENHANCER_TEMPLATE.format(
+                diagram_type=diagram_type,
+                plan=plan,
+                user_prompt=user_prompt,
             )
-
-            if isinstance(result, str):
-                result_text = result
-            else:
-                content = getattr(result, "content", None)
-
-            if isinstance(content, str):
-                result_text = content
-            else:
-                result_text = str(result)
-
+            result_text = self._chat_complete(formatted_prompt, max_tokens=512)
             logger.debug(f"Successfully enhanced prompt for {diagram_type} diagram")
             return result_text.strip()
         except Exception as e:

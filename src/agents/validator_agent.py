@@ -1,9 +1,11 @@
 """Validator Agent for FlowForge - validates Mermaid diagrams with refined checks."""
 
 import re
+import time
 from typing import Any
 
-from langchain_huggingface import HuggingFaceEndpoint
+from huggingface_hub import InferenceClient
+from huggingface_hub.errors import HfHubHTTPError
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
@@ -28,7 +30,7 @@ for improvement. Distinguish between critical errors and style recommendations."
         """Initialize validator agent."""
         super().__init__("validator_agent")
 
-        self.llm: HuggingFaceEndpoint | None = None
+        self.llm: InferenceClient | None = None
         self._initialize_llm()
 
     def _initialize_llm(self) -> None:
@@ -36,12 +38,9 @@ for improvement. Distinguish between critical errors and style recommendations."
         if not Config.HF_TOKEN:
             raise ValueError("HF_TOKEN must be set.")
 
-        self.llm = HuggingFaceEndpoint(
-            repo_id="Qwen/Qwen2.5-VL-72B-Instruct",
-            task="text-generation",
-            max_new_tokens=1024,
-            temperature=0.2,
-            huggingfacehub_api_token=Config.HF_TOKEN,
+        self.llm = InferenceClient(
+            model="Qwen/Qwen2.5-VL-72B-Instruct",
+            token=Config.HF_TOKEN,
         )
 
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +132,47 @@ for improvement. Distinguish between critical errors and style recommendations."
                 },
             )
 
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        """Check if an exception is retryable (timeout, server errors, etc.)."""
+        if isinstance(exc, HfHubHTTPError):
+            response = getattr(exc, "response", None)
+            if response:
+                status_code = getattr(response, "status_code", None)
+                return status_code in (408, 429, 500, 502, 503, 504)
+        return isinstance(exc, (TimeoutError, ConnectionError))
+
+    def _chat_completion_with_retry(
+        self, messages: list, max_tokens: int
+    ) -> Any:
+        """Execute chat completion with retry logic for transient failures."""
+        last_exception = None
+        max_attempts = 3
+        base_delay = 1.0
+
+        for attempt in range(max_attempts):
+            try:
+                response = self.llm.chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+                return response
+            except Exception as exc:
+                last_exception = exc
+                if not self._is_retryable_error(exc):
+                    raise exc
+                if attempt < max_attempts - 1:
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+
+        raise last_exception
+
     def _validate_single_diagram(
         self, diagram: str, diagram_type: str
     ) -> dict[str, Any]:
@@ -176,11 +216,14 @@ for improvement. Distinguish between critical errors and style recommendations."
         )
 
         try:
-            llm_response = self.llm.invoke(validation_prompt)
+            llm_response = self._chat_completion_with_retry(
+                messages=[{"role": "user", "content": validation_prompt}],
+                max_tokens=300,
+            )
 
             response_text = (
-                llm_response.content.strip()
-                if hasattr(llm_response, "content")
+                llm_response.choices[0].message.content.strip()
+                if hasattr(llm_response, "choices")
                 else str(llm_response).strip()
             )
 
