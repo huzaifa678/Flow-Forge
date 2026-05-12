@@ -1,9 +1,11 @@
 """Time Agent for FlowForge - generates project timelines with milestones and parallel work streams."""
 
+import time
 from typing import Any
 
+from huggingface_hub import InferenceClient
+from huggingface_hub.errors import HfHubHTTPError
 from langchain_core.prompts import PromptTemplate
-from langchain_huggingface import HuggingFaceEndpoint
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
@@ -39,7 +41,7 @@ Return structured output with clear sections for each component."""
         """Initialize the time agent."""
         super().__init__("time_agent")
 
-        self.llm: HuggingFaceEndpoint | None = None
+        self.llm: InferenceClient | None = None
         self._initialize_llm()
 
     def _initialize_llm(self) -> None:
@@ -54,13 +56,9 @@ Return structured output with clear sections for each component."""
         if not Config.HF_TOKEN:
             raise ValueError("HF_TOKEN must be set.")
 
-        self.llm = HuggingFaceEndpoint(
-            repo_id="Qwen/Qwen2.5-Coder-32B-Instruct",
-            task="text-generation",
-            max_new_tokens=1024,
-            temperature=0.5,
-            top_p=0.9,
-            huggingfacehub_api_token=Config.HF_TOKEN,
+        self.llm = InferenceClient(
+            model="Qwen/Qwen2.5-Coder-32B-Instruct",
+            token=Config.HF_TOKEN,
         )
 
     def _build_timeline_prompt(
@@ -149,6 +147,47 @@ gantt
             proposal=proposal,
         )
 
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        """Check if an exception is retryable (timeout, server errors, etc.)."""
+        if isinstance(exc, HfHubHTTPError):
+            response = getattr(exc, "response", None)
+            if response:
+                status_code = getattr(response, "status_code", None)
+                return status_code in (408, 429, 500, 502, 503, 504)
+        return isinstance(exc, (TimeoutError, ConnectionError))
+
+    def _chat_completion_with_retry(
+        self, messages: list, max_tokens: int
+    ) -> Any:
+        """Execute chat completion with retry logic for transient failures."""
+        last_exception = None
+        max_attempts = 3
+        base_delay = 1.0
+
+        for attempt in range(max_attempts):
+            try:
+                response = self.llm.chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+                return response
+            except Exception as exc:
+                last_exception = exc
+                if not self._is_retryable_error(exc):
+                    raise exc
+                if attempt < max_attempts - 1:
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+
+        raise last_exception
+
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
         """
         Generate timetable and Gantt chart from proposal.
@@ -197,10 +236,18 @@ gantt
                 include_parallel_work=include_parallel_work,
             )
 
-            response = self.llm.invoke(formatted_prompt)
+            response = self._chat_completion_with_retry(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": formatted_prompt,
+                    }
+                ],
+                max_tokens=600,
+            )
             timetable = (
-                response.content.strip()
-                if hasattr(response, "content")
+                response.choices[0].message.content.strip()
+                if hasattr(response, "choices")
                 else str(response).strip()
             )
 

@@ -8,7 +8,16 @@ def format_workflow_response(result: dict[str, Any]) -> dict[str, Any]:
     This avoids Pydantic validation issues with nested objects in tests
     while still producing a clean, serializable response structure.
     """
-    status = "success" if not result.get("error") else "failed"
+    has_error = bool(result.get("error"))
+    total = result.get("diagram_count", len(result.get("diagrams", [])))
+    valid = result.get("valid_diagram_count", 0)
+
+    if has_error and total == 0:
+        status = "failed"
+    elif total > 0 and valid < total:
+        status = "partial"
+    else:
+        status = "success"
 
     # If we have diagrams but some failed, it's partial
     total = result.get("diagram_count", len(result.get("diagrams", [])))
