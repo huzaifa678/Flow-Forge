@@ -1,5 +1,6 @@
 """FastAPI router for FlowForge diagram generation endpoints."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from src.api.dependencies import get_hf_token
 from src.logger import setup_logger
@@ -99,9 +100,19 @@ async def generate_diagrams(
             diagram_types=[dt.value for dt in prompt_data.diagram_types],
             optimize_prompt=prompt_data.optimize_prompt,
         )
-        logger.info("FlowForge workflow completed successfully")
 
-        return format_workflow_response(result)
+        formatted_response = format_workflow_response(result)
+
+        if result.get("error") and not formatted_response.get("diagrams"):
+            logger.error("FlowForge workflow failed: %s", result.get("error"))
+            return JSONResponse(
+                status_code=500,
+                content=formatted_response,
+            )
+        elif result.get("error"):
+            logger.warning("FlowForge workflow partially failed: %s", result.get("error"))
+
+        return formatted_response
 
     except ValueError as exc:
         logger.warning("Validation error in diagram generation request: %s", str(exc))
