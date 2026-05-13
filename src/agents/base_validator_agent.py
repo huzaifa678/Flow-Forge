@@ -3,7 +3,7 @@
 import re
 import time
 from abc import abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
@@ -66,7 +66,7 @@ Important:
 Return ONLY the requested format.
 """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, session_manager: Optional[Any] = None) -> None:
         """
         Initialize base validator agent.
 
@@ -74,8 +74,10 @@ Return ONLY the requested format.
         ----------
         name : str
             Name of the validator agent.
+        session_manager : SessionManager, optional
+            Session manager for database persistence.
         """
-        super().__init__(name)
+        super().__init__(name, session_manager=session_manager)
 
         self.llm: InferenceClient | None = None
         self._initialize_llm()

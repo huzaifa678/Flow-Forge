@@ -1,7 +1,7 @@
 """Plan Agent for FlowForge - generates detailed project plans from timelines."""
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 import concurrent.futures
 from huggingface_hub import InferenceClient
@@ -34,9 +34,9 @@ For each task, consider:
 - Risk level and mitigation approach
 - Definition of done"""
 
-    def __init__(self) -> None:
+    def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize the plan agent."""
-        super().__init__("plan_agent")
+        super().__init__("plan_agent", session_manager=session_manager)
 
         self.llm: InferenceClient | None = None
         self._initialize_llm()

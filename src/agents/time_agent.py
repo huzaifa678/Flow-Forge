@@ -1,7 +1,7 @@
 """Time Agent for FlowForge - generates project timelines with milestones and parallel work streams."""
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
@@ -99,10 +99,11 @@ gantt
     QA Testing :a5, after a3, 7d
 
     section Deployment
-    Release :a6, after a5, 3d"""
-    def __init__(self) -> None:
+    Release :a6, after a5, 3d
+```"""
+    def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize the time agent."""
-        super().__init__("time_agent")
+        super().__init__("time_agent", session_manager=session_manager)
 
         self.llm: InferenceClient | None = None
         self._initialize_llm()
@@ -320,7 +321,7 @@ gantt
 
             self.logger.info("Timeline generated successfully.")
 
-            return self._update_state(
+            result_state = self._update_state(
                 state,
                 {
                     "timetable": timetable,
@@ -330,6 +331,19 @@ gantt
                     "current_agent": "time_agent",
                 },
             )
+
+            self._save_session_output(
+                output_type="timeline",
+                output_data={
+                    "timetable": timetable,
+                    "milestones": milestones,
+                    "parallel_work_streams": parallel_streams,
+                },
+                feedback=result_state.get("error"),
+                is_valid=1 if not result_state.get("error") else 0,
+            )
+
+            return result_state
 
         except Exception as exc:
             error_msg = f"Time agent failed: {exc}"
