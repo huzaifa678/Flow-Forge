@@ -47,6 +47,6 @@ jobs:
       - name: Run tests
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/testdb
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/testdb
         run: |
           python -m pytest tests/ -v
