@@ -1,45 +1,6 @@
-from contextlib import contextmanager
 from typing import Any, Optional
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy.pool import QueuePool
-
-from src.config import Config
-from src.database.models import Base, Session as SessionModel, SessionOutput
-
-engine = create_engine(
-    Config.DATABASE_URL,
-    echo=False,
-    poolclass=QueuePool,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-)
-SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
-
-
-@contextmanager
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        SessionLocal.remove()
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
-
-
-def close_db():
-    SessionLocal.remove()
-    engine.dispose()
+from src.database.base import get_db
+from src.database.models import Session as SessionModel, SessionOutput
 
 
 class SessionService:
