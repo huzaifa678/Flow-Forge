@@ -301,13 +301,15 @@ class TestAPIEndpointsIntegration(unittest.TestCase):
 class TestWorkflowAndResponseFormattingIntegration(unittest.TestCase):
     """Integration tests for workflow execution and response formatting."""
 
+    @patch('src.workflow.graph_workflow.SessionManager')
     @patch('src.workflow.graph_workflow.TimeAgent')
     @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
     @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
     @patch('src.workflow.graph_workflow.ValidatorAgent')
     def test_full_workflow_produces_valid_api_response(self, mock_validator, mock_image,
-                                                         mock_plan, mock_time_validator, mock_time):
+                                                         mock_plan, mock_time_validator, mock_time,
+                                                         mock_session_manager):
         """Test that full workflow execution produces a properly formatted API response."""
         # Setup mocks for successful execution
         mock_time_instance = Mock()

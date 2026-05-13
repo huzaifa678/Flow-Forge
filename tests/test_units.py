@@ -772,6 +772,7 @@ class TestWorkflow(unittest.TestCase):
         mock_image.assert_called_once()
         mock_validator.assert_called_once()
 
+    @patch('src.workflow.graph_workflow.SessionManager')
     @patch('src.workflow.graph_workflow.TimeAgent')
     @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
@@ -784,6 +785,7 @@ class TestWorkflow(unittest.TestCase):
         mock_plan,
         mock_time_validator,
         mock_time,
+        mock_session_manager,
     ):
         """Test that workflow state flows correctly through agents."""
 
@@ -854,6 +856,7 @@ class TestWorkflow(unittest.TestCase):
         self.assertIn("diagrams", result)
         self.assertIn("overall_validation", result)
 
+    @patch('src.workflow.graph_workflow.SessionManager')
     @patch('src.workflow.graph_workflow.TimeAgent')
     @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
@@ -866,6 +869,7 @@ class TestWorkflow(unittest.TestCase):
         mock_plan,
         mock_time_validator,
         mock_time,
+        mock_session_manager,
     ):
         """Test workflow where validation fails first time then succeeds on retry."""
 
@@ -957,6 +961,7 @@ class TestWorkflow(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("diagrams", result)
 
+    @patch('src.workflow.graph_workflow.SessionManager')
     @patch('src.workflow.graph_workflow.TimeAgent')
     @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
@@ -969,6 +974,7 @@ class TestWorkflow(unittest.TestCase):
         mock_plan,
         mock_time_validator,
         mock_time,
+        mock_session_manager,
     ):
         """Test workflow where diagram validation fails then succeeds on retry."""
 

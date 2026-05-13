@@ -16,8 +16,11 @@ def get_engine():
     global _engine
 
     if _engine is None:
+        db_url = Config.DATABASE_URL
+        if db_url and db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
         _engine = create_engine(
-            Config.DATABASE_URL,
+            db_url,
             echo=False,
             poolclass=QueuePool,
             pool_size=10,
