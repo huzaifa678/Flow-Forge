@@ -1,68 +1,59 @@
 """Validator Agent for FlowForge - validates Mermaid diagrams with refined checks."""
 
-import re
-import time
 from typing import Any
 
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
+from src.agents.base_validator_agent import BaseValidatorAgent
 
-from src.agents.base_agent import BaseAgent
-from src.config import Config
+class ValidatorAgent(BaseValidatorAgent):
+    """Validate Mermaid diagrams for syntax correctness and best practices.
 
-
-class ValidatorAgent(BaseAgent):
-    """Validate Mermaid diagrams for syntax correctness, logical consistency, and best practices."""
-
-    VALIDATOR_SYSTEM_PROMPT = """You are an expert Mermaid diagram validator and code reviewer.
-Your role is to thoroughly validate Mermaid.js diagrams for:
-
-1. Syntax correctness (valid Mermaid grammar)
-2. Logical consistency (no circular dependencies, proper node references)
-3. Structural completeness (all nodes defined, proper connections)
-4. Best practices (naming conventions, readability, organization)
-5. Production readiness (error handling, scalability considerations)
-
-Be precise in your feedback. Provide specific line numbers and concrete suggestions
-for improvement. Distinguish between critical errors and style recommendations."""
+    When validation fails, sets 'route_to' = 'image_agent' in the state
+    so the workflow re-routes to the image generator with improvement feedback.
+    """
 
     def __init__(self) -> None:
         """Initialize validator agent."""
         super().__init__("validator_agent")
 
-        self.llm: InferenceClient | None = None
-        self._initialize_llm()
-
-    def _initialize_llm(self) -> None:
-        """Initialize Hugging Face LLM."""
-        if not Config.HF_TOKEN:
-            raise ValueError("HF_TOKEN must be set.")
-
-        self.llm = InferenceClient(
-            model="Qwen/Qwen2.5-VL-72B-Instruct",
-            token=Config.HF_TOKEN,
-        )
+    def _get_model(self) -> str:
+        """Return the HuggingFace model identifier."""
+        return "Qwen/Qwen2.5-VL-7B-Instruct"
 
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
         """
-        Validate all Mermaid diagrams in the workflow state.
+        Validate all Mermaid diagrams in workflow state.
+
+        When diagrams fail validation, includes improvement feedback
+        and signals the workflow to route back to the image generator.
 
         Parameters
         ----------
         state : dict[str, Any]
-            Workflow state containing diagrams to validate.
+            Workflow state containing diagrams.
 
         Returns
         -------
         dict[str, Any]
-            Updated workflow state with validation results per diagram.
+            Updated workflow state with validation results and routing info.
         """
         try:
+            self.logger.info("Starting diagram validation workflow.")
+
             diagrams = state.get("diagrams", [])
 
-            # Support legacy single-diagram state
+            self.logger.info(
+                "Initial diagrams count from state: %d",
+                len(diagrams),
+            )
+
+            # Legacy fallback
             legacy_diagram = state.get("mermaid_diagram")
+
             if legacy_diagram and not diagrams:
+                self.logger.info(
+                    "Legacy single diagram detected. Converting to diagrams list."
+                )
+
                 diagrams = [
                     {
                         "mermaid_code": legacy_diagram,
@@ -70,57 +61,151 @@ for improvement. Distinguish between critical errors and style recommendations."
                     }
                 ]
 
+            # Track previous generation prompts for re-generation
+            previous_prompts = state.get("previous_prompts", [])
+
             if not diagrams:
+                self.logger.warning("No diagrams found for validation.")
+
                 return self._update_state(
                     state,
                     {
                         "error": "No diagrams to validate.",
                         "validation_results": [],
                         "overall_validation": False,
+                        "route_to": "end",
                         "current_agent": "validator_agent",
                     },
                 )
 
-            self.logger.info("Validating %d diagrams.", len(diagrams))
+            self.logger.info(
+                "Validating %d diagrams.",
+                len(diagrams),
+            )
 
             validation_results = []
             all_valid = True
+            invalid_diagrams = []
 
             for idx, diagram_data in enumerate(diagrams):
+                self.logger.info(
+                    "Processing diagram %d/%d",
+                    idx + 1,
+                    len(diagrams),
+                )
+
                 mermaid_code = diagram_data.get("mermaid_code", "")
                 diagram_type = diagram_data.get("diagram_type", "unknown")
 
-                result = self._validate_single_diagram(mermaid_code, diagram_type)
+                self.logger.info(
+                    "Diagram type=%s | code_length=%d",
+                    diagram_type,
+                    len(mermaid_code),
+                )
+
+                self.logger.info(
+                    "Diagram preview:\n%s",
+                    mermaid_code[:500],
+                )
+
+                result = self._validate_single_diagram(
+                    mermaid_code,
+                    diagram_type,
+                )
+
                 result["index"] = idx
                 result["diagram_type"] = diagram_type
+
                 validation_results.append(result)
+
+                self.logger.info(
+                    "Validation result for %s | valid=%s",
+                    diagram_type,
+                    result.get("is_valid"),
+                )
+
+                self.logger.info(
+                    "Validation feedback: %s",
+                    result.get("feedback"),
+                )
+
+                if result.get("critical_issues"):
+                    self.logger.warning(
+                        "Critical issues found: %s",
+                        result["critical_issues"],
+                    )
+
+                if result.get("warnings"):
+                    self.logger.warning(
+                        "Warnings found: %s",
+                        result["warnings"],
+                    )
 
                 if not result["is_valid"]:
                     all_valid = False
+                    invalid_diagrams.append({
+                        "index": idx,
+                        "diagram_type": diagram_type,
+                        "feedback": result.get("feedback", ""),
+                        "critical_issues": result.get("critical_issues", []),
+                        "warnings": result.get("warnings", []),
+                        "suggestions": result.get("suggestions", []),
+                    })
+
+            valid_count = sum(
+                1 for r in validation_results if r["is_valid"]
+            )
 
             self.logger.info(
-                "Validation complete: %d/%d diagrams valid.",
-                sum(1 for r in validation_results if r["is_valid"]),
+                "Validation complete | valid=%d/%d",
+                valid_count,
                 len(validation_results),
             )
 
-            return self._update_state(
-                state,
-                {
-                    "validation_results": validation_results,
-                    "overall_validation": all_valid,
-                    "valid_count": sum(
-                        1 for r in validation_results if r["is_valid"]
-                    ),
-                    "total_count": len(validation_results),
-                    "error": None,
-                    "current_agent": "validator_agent",
-                },
-            )
+            if all_valid:
+                return self._update_state(
+                    state,
+                    {
+                        "validation_results": validation_results,
+                        "overall_validation": True,
+                        "valid_count": valid_count,
+                        "total_count": len(validation_results),
+                        "error": None,
+                        "route_to": "end",
+                        "current_agent": "validator_agent",
+                    },
+                )
+            else:
+                # Build improvement feedback for the image generator
+                improvement_prompt = self._build_improvement_prompt(
+                    invalid_diagrams, previous_prompts
+                )
+
+                return self._update_state(
+                    state,
+                    {
+                        "validation_results": validation_results,
+                        "overall_validation": False,
+                        "valid_count": valid_count,
+                        "total_count": len(validation_results),
+                        "error": (
+                            f"{len(invalid_diagrams)}/{len(validation_results)} "
+                            f"diagrams failed validation"
+                        ),
+                        "improvement_prompt": improvement_prompt,
+                        "failed_diagrams": invalid_diagrams,
+                        "route_to": "image_agent",
+                        "current_agent": "validator_agent",
+                    },
+                )
 
         except Exception as exc:
             error_msg = f"Validator agent failed: {exc}"
-            self.logger.error(error_msg, exc_info=True)
+
+            self.logger.error(
+                error_msg,
+                exc_info=True,
+            )
 
             return self._update_state(
                 state,
@@ -128,67 +213,119 @@ for improvement. Distinguish between critical errors and style recommendations."
                     "error": error_msg,
                     "validation_results": [],
                     "overall_validation": False,
+                    "route_to": "end",
                     "current_agent": "validator_agent",
                 },
             )
 
-    def _is_retryable_error(self, exc: Exception) -> bool:
-        """Check if an exception is retryable (timeout, server errors, etc.)."""
-        if isinstance(exc, HfHubHTTPError):
-            response = getattr(exc, "response", None)
-            if response:
-                status_code = getattr(response, "status_code", None)
-                return status_code in (408, 429, 500, 502, 503, 504)
-        return isinstance(exc, (TimeoutError, ConnectionError))
+    def _build_improvement_prompt(
+        self,
+        invalid_diagrams: list[dict],
+        previous_prompts: list[str],
+    ) -> str:
+        """Build a prompt telling the image generator what to fix.
 
-    def _chat_completion_with_retry(
-        self, messages: list, max_tokens: int
-    ) -> Any:
-        """Execute chat completion with retry logic for transient failures."""
-        last_exception = None
-        max_attempts = 3
-        base_delay = 1.0
+        Parameters
+        ----------
+        invalid_diagrams : list[dict]
+            List of failed diagram info dicts with feedback and issues.
+        previous_prompts : list[str]
+            Previous generation prompts to avoid repeating mistakes.
 
-        for attempt in range(max_attempts):
-            try:
-                response = self.llm.chat_completion(
-                    messages=messages,
-                    max_tokens=max_tokens,
+        Returns
+        -------
+        str
+            Improvement prompt for the image generator.
+        """
+        prompt_parts = [
+            "IMPORTANT: The previous diagram generation had validation failures. "
+            "Please regenerate the diagrams with strict adherence to the following fixes:"
+        ]
+
+        for idx, diag in enumerate(invalid_diagrams):
+            diag_type = diag.get("diagram_type", "unknown")
+            prompt_parts.append(f"\n--- Diagram #{idx + 1} ({diag_type}) ---")
+
+            feedback = diag.get("feedback", "")
+            if feedback:
+                prompt_parts.append(f"Issue: {feedback}")
+
+            critical = diag.get("critical_issues", [])
+            if critical:
+                prompt_parts.append(
+                    f"Critical issues: {'; '.join(critical)}"
                 )
-                return response
-            except Exception as exc:
-                last_exception = exc
-                if not self._is_retryable_error(exc):
-                    raise exc
-                if attempt < max_attempts - 1:
-                    delay = base_delay * (2**attempt)
-                    self.logger.warning(
-                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        max_attempts,
-                        delay,
-                        exc,
-                    )
-                    time.sleep(delay)
 
-        raise last_exception
+            warnings = diag.get("warnings", [])
+            if warnings:
+                prompt_parts.append(
+                    f"Warnings: {'; '.join(warnings)}"
+                )
+
+            suggestions = diag.get("suggestions", [])
+            if suggestions:
+                prompt_parts.append(
+                    f"Suggestions: {'; '.join(suggestions)}"
+                )
+
+        if previous_prompts:
+            prompt_parts.append(
+                "\nNote: Previous prompts that produced invalid results: "
+            )
+            for p in previous_prompts[-3:]:
+                prompt_parts.append(f"  - {p[:200]}")
+
+        prompt_parts.append(
+            "\nMake sure all generated Mermaid diagrams are syntactically valid, "
+            "start with the correct diagram type keyword, have balanced brackets, "
+            "and follow Mermaid.js best practices."
+        )
+
+        return "\n".join(prompt_parts)
 
     def _validate_single_diagram(
-        self, diagram: str, diagram_type: str
+        self,
+        diagram: str,
+        diagram_type: str,
     ) -> dict[str, Any]:
         """
         Validate a single Mermaid diagram.
 
-        Args:
-            diagram: The Mermaid diagram code.
-            diagram_type: The type of diagram being validated.
+        Parameters
+        ----------
+        diagram : str
+            Mermaid diagram code.
+        diagram_type : str
+            Diagram type.
 
-        Returns:
-            Dict with validation results.
+        Returns
+        -------
+        dict[str, Any]
+            Validation results.
         """
-        # Basic structural validation first
+        self.logger.info(
+            "Running validation for diagram_type=%s",
+            diagram_type,
+        )
+
+        self.logger.info(
+            "Diagram size=%d chars",
+            len(diagram),
+        )
+
         basic_result = self._basic_mermaid_validation(diagram)
+
+        self.logger.info(
+            "Basic validation result=%s",
+            basic_result,
+        )
+
         if not basic_result["is_valid"]:
+            self.logger.warning(
+                "Basic Mermaid validation failed: %s",
+                basic_result["feedback"],
+            )
+
             return {
                 **basic_result,
                 "is_valid": False,
@@ -196,8 +333,6 @@ for improvement. Distinguish between critical errors and style recommendations."
                 "suggestions": [],
             }
 
-        # Build validation prompt using concatenation to avoid .format() issues
-        # with curly braces in the template
         validation_prompt = (
             self.VALIDATOR_SYSTEM_PROMPT
             + "\n\n"
@@ -212,12 +347,22 @@ for improvement. Distinguish between critical errors and style recommendations."
             + "CRITICAL_ISSUES: [list or \"None\"]\n"
             + "WARNINGS: [list or \"None\"]\n"
             + "SUGGESTIONS: [list or \"None\"]\n"
-            + "FEEDBACK: [detailed explanation of findings]\n"
+            + "FEEDBACK: [detailed explanation]\n"
+        )
+
+        self.logger.info(
+            "Validation prompt length=%d",
+            len(validation_prompt),
         )
 
         try:
             llm_response = self._chat_completion_with_retry(
-                messages=[{"role": "user", "content": validation_prompt}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": validation_prompt,
+                    }
+                ],
                 max_tokens=300,
             )
 
@@ -227,9 +372,27 @@ for improvement. Distinguish between critical errors and style recommendations."
                 else str(llm_response).strip()
             )
 
-            return self._parse_llm_validation(response_text)
+            self.logger.info(
+                "Raw validator response:\n%s",
+                response_text,
+            )
+
+            parsed = self._parse_llm_validation(response_text)
+
+            self.logger.info(
+                "Parsed validation result=%s",
+                parsed,
+            )
+
+            return parsed
 
         except Exception as exc:
+            self.logger.error(
+                "Validation LLM call failed: %s",
+                exc,
+                exc_info=True,
+            )
+
             return {
                 "is_valid": False,
                 "feedback": f"Validation LLM call failed: {exc}",
@@ -237,109 +400,3 @@ for improvement. Distinguish between critical errors and style recommendations."
                 "warnings": [],
                 "suggestions": [],
             }
-
-    def _basic_mermaid_validation(self, diagram: str) -> dict[str, Any]:
-        """Basic structural validation of Mermaid syntax."""
-        if not diagram or not diagram.strip():
-            return {"is_valid": False, "feedback": "Empty diagram."}
-
-        valid_starts = [
-            "gantt",
-            "flowchart",
-            "graph",
-            "sequenceDiagram",
-            "classDiagram",
-            "stateDiagram",
-            "erDiagram",
-            "pie",
-            "journey",
-            "gitGraph",
-        ]
-
-        diagram_lower = diagram.lower().strip()
-
-        if not any(diagram_lower.startswith(v.lower()) for v in valid_starts):
-            return {
-                "is_valid": False,
-                "feedback": (
-                    f"Diagram does not start with valid Mermaid syntax. "
-                    f"Got: '{diagram_lower[:50]}...'"
-                ),
-            }
-
-        # Check bracket balance
-        for open_char, close_char in [("(", ")"), ("[", "]"), ("{", "}")]:
-            if diagram.count(open_char) != diagram.count(close_char):
-                return {
-                    "is_valid": False,
-                    "feedback": f"Mismatched '{open_char}'/'{close_char}' brackets.",
-                }
-
-        return {"is_valid": True, "feedback": "Validation passed."}
-
-    def _parse_llm_validation(self, response: str) -> dict[str, Any]:
-        """Parse structured validation response from LLM."""
-        result = {
-            "is_valid": True,
-            "feedback": "",
-            "critical_issues": [],
-            "warnings": [],
-            "suggestions": [],
-        }
-
-        # Parse VALID field
-        valid_match = re.search(r"VALID:\s*(true|false)", response, re.I)
-        if valid_match:
-            result["is_valid"] = valid_match.group(1).lower() == "true"
-
-        # Parse CRITICAL_ISSUES
-        critical_match = re.search(
-            r"CRITICAL_ISSUES:\s*(.+?)(?:\n(?:WARNINGS|SUGGESTIONS|FEEDBACK|$))",
-            response,
-            re.I | re.DOTALL,
-        )
-        if critical_match:
-            issues = critical_match.group(1).strip()
-            if issues.lower() != "none":
-                result["critical_issues"] = [
-                    i.strip()
-                    for i in re.split(r"[\n,]", issues)
-                    if i.strip() and i.strip() != "-"
-                ]
-
-        # Parse WARNINGS
-        warnings_match = re.search(
-            r"WARNINGS:\s*(.+?)(?:\n(?:SUGGESTIONS|FEEDBACK|$))",
-            response,
-            re.I | re.DOTALL,
-        )
-        if warnings_match:
-            warnings = warnings_match.group(1).strip()
-            if warnings.lower() != "none":
-                result["warnings"] = [
-                    i.strip()
-                    for i in re.split(r"[\n,]", warnings)
-                    if i.strip() and i.strip() != "-"
-                ]
-
-        # Parse SUGGESTIONS
-        suggestions_match = re.search(
-            r"SUGGESTIONS:\s*(.+?)(?:\n(?:FEEDBACK|$))",
-            response,
-            re.I | re.DOTALL,
-        )
-        if suggestions_match:
-            suggestions = suggestions_match.group(1).strip()
-            if suggestions.lower() != "none":
-                result["suggestions"] = [
-                    i.strip()
-                    for i in re.split(r"[\n,]", suggestions)
-                    if i.strip() and i.strip() != "-"
-                ]
-
-        # Parse FEEDBACK
-        feedback_match = re.search(r"FEEDBACK:\s*(.*)", response, re.I | re.S)
-        if feedback_match:
-            result["feedback"] = feedback_match.group(1).strip()
-
-        return result

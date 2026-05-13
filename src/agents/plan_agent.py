@@ -9,7 +9,7 @@ from huggingface_hub.errors import HfHubHTTPError
 from langchain_core.prompts import PromptTemplate
 
 from src.agents.base_agent import BaseAgent
-from src.config import Config
+from src.config import Config, LLMConfig
 
 
 class PlanAgent(BaseAgent):
@@ -56,7 +56,7 @@ For each task, consider:
         self.llm = InferenceClient(
             model="deepseek-ai/DeepSeek-R1",
             token=Config.HF_TOKEN,
-            provider="together"
+            provider=LLMConfig.PLAN_PROVIDER,
         )
 
     def _build_plan_prompt(

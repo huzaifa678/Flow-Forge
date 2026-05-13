@@ -302,10 +302,12 @@ class TestWorkflowAndResponseFormattingIntegration(unittest.TestCase):
     """Integration tests for workflow execution and response formatting."""
 
     @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
     @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
     @patch('src.workflow.graph_workflow.ValidatorAgent')
-    def test_full_workflow_produces_valid_api_response(self, mock_validator, mock_image, mock_plan, mock_time):
+    def test_full_workflow_produces_valid_api_response(self, mock_validator, mock_image,
+                                                         mock_plan, mock_time_validator, mock_time):
         """Test that full workflow execution produces a properly formatted API response."""
         # Setup mocks for successful execution
         mock_time_instance = Mock()
@@ -316,6 +318,14 @@ class TestWorkflowAndResponseFormattingIntegration(unittest.TestCase):
             "error": None,
         }
         mock_time.return_value = mock_time_instance
+
+        mock_time_validator_instance = Mock()
+        mock_time_validator_instance.execute.return_value = {
+            "time_overall_validation": True,
+            "time_validation_results": [],
+            "error": None,
+        }
+        mock_time_validator.return_value = mock_time_validator_instance
 
         mock_plan_instance = Mock()
         mock_plan_instance.execute.return_value = {

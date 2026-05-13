@@ -3,32 +3,20 @@ from typing import Any
 
 
 def format_workflow_response(result: dict[str, Any]) -> dict[str, Any]:
-    """Format the raw workflow state into a structured API response dict.
-
-    This avoids Pydantic validation issues with nested objects in tests
-    while still producing a clean, serializable response structure.
-    """
+    """Format workflow state into API response with image data included."""
     has_error = bool(result.get("error"))
-    total = result.get("diagram_count", len(result.get("diagrams", [])))
-    valid = result.get("valid_diagram_count", 0)
 
-    if has_error and total == 0:
-        status = "failed"
-    elif total > 0 and valid < total:
-        status = "partial"
-    else:
-        status = "success"
-
-    # If we have diagrams but some failed, it's partial
     total = result.get("diagram_count", len(result.get("diagrams", [])))
     valid = result.get("valid_diagram_count", 0)
 
     if total > 0 and valid < total:
         status = "partial"
-    elif total == 0 and result.get("error"):
+    elif total == 0 and has_error:
         status = "failed"
+    else:
+        status = "success"
 
-    # Format timeline output
+    # Timeline formatting
     timeline = None
     if result.get("timetable"):
         timeline = {
@@ -42,6 +30,18 @@ def format_workflow_response(result: dict[str, Any]) -> dict[str, Any]:
             "raw_timetable": result["timetable"],
         }
 
+    diagrams_out = []
+    for d in result.get("diagrams", []):
+        diagrams_out.append({
+            "diagram_type": d.get("diagram_type"),
+            "mermaid_code": d.get("mermaid_code"),
+            "title": d.get("title"),
+            "description": d.get("description"),
+            "is_valid": d.get("is_valid", False),
+            "validation_feedback": d.get("validation_feedback"),
+            "image_data": d.get("image_data"),
+        })
+
     return {
         "status": status,
         "proposal_summary": result.get(
@@ -50,7 +50,7 @@ def format_workflow_response(result: dict[str, Any]) -> dict[str, Any]:
         "optimized_prompt": result.get("optimized_prompt"),
         "timeline": timeline,
         "plan": result.get("plan"),
-        "diagrams": result.get("diagrams", []),
+        "diagrams": diagrams_out,
         "valid_diagram_count": valid,
         "total_diagram_count": total,
         "overall_validation": result.get("overall_validation", False),
