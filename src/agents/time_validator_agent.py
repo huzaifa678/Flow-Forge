@@ -5,9 +5,10 @@ When validation fails, signals the workflow to route back to TimeAgent for
 regeneration with corrective feedback.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from src.agents.base_validator_agent import BaseValidatorAgent
+
 
 class TimeValidatorAgent(BaseValidatorAgent):
     """Validate time agent outputs (timetable, milestones, Gantt charts).
@@ -38,9 +39,9 @@ Be strict in your validation. Flag any timeline that lacks:
 
 Return structured validation results in the EXACT format specified."""
 
-    def __init__(self) -> None:
+    def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize time validator agent."""
-        super().__init__("time_validator_agent")
+        super().__init__("time_validator_agent", session_manager=session_manager)
 
     def _get_model(self) -> str:
         """Return the HuggingFace model identifier."""
@@ -148,7 +149,7 @@ Return structured validation results in the EXACT format specified."""
                     validation_results, timetable
                 )
 
-                return self._update_state(
+                result_state = self._update_state(
                     state,
                     {
                         "time_validation_results": validation_results,
@@ -165,6 +166,24 @@ Return structured validation results in the EXACT format specified."""
                         "current_agent": "time_validator_agent",
                     },
                 )
+
+                self._save_session_output(
+                    output_type="time_validation",
+                    output_data={
+                        "validation_results": validation_results,
+                        "overall_valid": False,
+                        "valid_count": valid_count,
+                        "total_checks": len(validation_results),
+                    },
+                    feedback=(
+                        f"{valid_count}/{len(validation_results)} checks passed. "
+                        f"Routing back to time agent for regeneration."
+                    ),
+                    is_valid=False,
+                )
+
+                return result_state
+                    
 
         except Exception as exc:
             error_msg = f"Time validator agent failed: {exc}"
