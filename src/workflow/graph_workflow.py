@@ -1,11 +1,16 @@
 """LangGraph workflow for FlowForge architecture.
 
-Implements the agent pipeline:
+Implements the agent pipeline with conditional routing:
   1. Prompt Optimization (LangChain)
   2. TimeAgent -> milestones, parallel work, Gantt chart
-  3. PlanAgent -> detailed plan for diagrams
-  4. ImageGeneratorAgent -> multiple diagrams (workflow, CI/CD, system design, etc.)
-  5. ValidatorAgent -> validates all generated diagrams
+  3. TimeValidatorAgent -> validates time output
+     - If INVALID: routes back to TimeAgent with corrective feedback
+     - If VALID: proceeds to Plan
+  4. PlanAgent -> detailed plan for diagrams
+  5. ImageGeneratorAgent -> multiple diagrams (workflow, CI/CD, system design, etc.)
+  6. ValidatorAgent -> validates all generated diagrams
+     - If INVALID: routes back to ImageGeneratorAgent with improvement feedback
+     - If VALID: proceeds to END
 """
 
 from typing import Any, Optional
@@ -16,7 +21,13 @@ from src.agents.time_agent import TimeAgent
 from src.agents.plan_agent import PlanAgent
 from src.agents.image_generator_agent import ImageGeneratorAgent
 from src.agents.validator_agent import ValidatorAgent
+from src.agents.time_validator_agent import TimeValidatorAgent
 from src.pipeline.prompt_optimizer import PromptOptimizer
+
+
+# Max retries to prevent infinite loops
+MAX_VALIDATION_RETRIES = 3
+MAX_TIME_RETRIES = 3
 
 
 class FlowForgeState(dict):
@@ -56,6 +67,19 @@ class FlowForgeState(dict):
     overall_validation: bool
     feedback: Optional[str]
 
+    # Time validation outputs
+    time_validation_results: list[dict]
+    time_overall_validation: bool
+
+    # Rerouting data
+    improvement_prompt: Optional[str]
+    corrective_prompt: Optional[str]
+    failed_diagrams: list[dict]
+
+    # Retry tracking
+    time_retry_count: int
+    validation_retry_count: int
+
     # Control flow
     current_agent: Optional[str]
     error: Optional[str]
@@ -75,8 +99,24 @@ class FlowForgeState(dict):
 
 
 def route_time(state: FlowForgeState) -> str:
-    """Route after time agent: proceed to plan or end on error."""
-    return "plan_agent" if not state.get("error") else "end"
+    """Route after time agent: proceed to time validator or end on error."""
+    if state.get("error"):
+        return "end"
+    return "time_validator_agent"
+
+
+def route_time_validator(state: FlowForgeState) -> str:
+    """Route after time validator: plan if valid, time agent if invalid (retry), end if max retries."""
+    if state.get("time_overall_validation", False):
+        return "plan_agent"
+
+    # Check retry limit
+    retry_count = state.get("time_retry_count", 0)
+    if retry_count >= MAX_TIME_RETRIES:
+        return "end"
+
+    # Route back to time agent for regeneration
+    return "time_agent"
 
 
 def route_plan(state: FlowForgeState) -> str:
@@ -90,8 +130,17 @@ def route_image(state: FlowForgeState) -> str:
 
 
 def route_validator(state: FlowForgeState) -> str:
-    """Route after validator agent: always end."""
-    return "end"
+    """Route after validator: end if valid, image agent if invalid (retry), end if max retries."""
+    if state.get("overall_validation", False):
+        return "end"
+
+    # Check retry limit
+    retry_count = state.get("validation_retry_count", 0)
+    if retry_count >= MAX_VALIDATION_RETRIES:
+        return "end"
+
+    # Route back to image agent for regeneration with improvement feedback
+    return "image_agent"
 
 
 def create_flowforge_workflow() -> StateGraph:
@@ -104,6 +153,7 @@ def create_flowforge_workflow() -> StateGraph:
     """
     # Initialize agents
     time_agent = TimeAgent()
+    time_validator_agent = TimeValidatorAgent()
     plan_agent = PlanAgent()
     image_agent = ImageGeneratorAgent()
     validator_agent = ValidatorAgent()
@@ -113,18 +163,30 @@ def create_flowforge_workflow() -> StateGraph:
 
     # Add all agent nodes
     workflow.add_node("time_agent", time_agent.execute)
+    workflow.add_node("time_validator_agent", time_validator_agent.execute)
     workflow.add_node("plan_agent", plan_agent.execute)
     workflow.add_node("image_agent", image_agent.execute)
     workflow.add_node("validator_agent", validator_agent.execute)
 
     workflow.set_entry_point("time_agent")
 
-    # Time -> Plan or END (if error)
+    # Time -> TimeValidator or END (if error)
     workflow.add_conditional_edges(
         "time_agent",
         route_time,
         {
+            "time_validator_agent": "time_validator_agent",
+            "end": END,
+        },
+    )
+
+    # TimeValidator -> Plan (valid), TimeAgent (invalid/retry), or END (max retries)
+    workflow.add_conditional_edges(
+        "time_validator_agent",
+        route_time_validator,
+        {
             "plan_agent": "plan_agent",
+            "time_agent": "time_agent",
             "end": END,
         },
     )
@@ -149,12 +211,13 @@ def create_flowforge_workflow() -> StateGraph:
         },
     )
 
-    # Validator -> END
+    # Validator -> END (valid), ImageAgent (invalid/retry), or END (max retries)
     workflow.add_conditional_edges(
         "validator_agent",
         route_validator,
         {
             "end": END,
+            "image_agent": "image_agent",
         },
     )
 
@@ -173,6 +236,12 @@ def get_optimizer() -> PromptOptimizer:
     return _optimizer
 
 
+def _increment_retry(state: FlowForgeState, key: str) -> dict[str, Any]:
+    """Increment a retry counter in the state."""
+    count = state.get(key, 0)
+    return {key: count + 1}
+
+
 def run_flowforge_workflow(
     proposal: str,
     prompt: str,
@@ -184,6 +253,7 @@ def run_flowforge_workflow(
     priority: str = "medium",
     diagram_types: list[str] | None = None,
     optimize_prompt: bool = True,
+    max_retries: int = 3,
 ) -> FlowForgeState:
     """
     Execute the FlowForge workflow with given inputs.
@@ -199,10 +269,15 @@ def run_flowforge_workflow(
         priority: Project priority (low, medium, high, critical)
         diagram_types: List of diagram types to generate
         optimize_prompt: Whether to apply LangChain prompt optimization
+        max_retries: Maximum retry attempts for validation loops
 
     Returns:
         FlowForgeState: Final state after workflow execution
     """
+    global MAX_VALIDATION_RETRIES, MAX_TIME_RETRIES
+    MAX_VALIDATION_RETRIES = max_retries
+    MAX_TIME_RETRIES = max_retries
+
     # Step 0: Prompt optimization with LangChain
     optimized_prompt = None
     working_prompt = prompt
@@ -246,6 +321,13 @@ def run_flowforge_workflow(
         validation_results=[],
         overall_validation=False,
         feedback=None,
+        time_validation_results=[],
+        time_overall_validation=False,
+        improvement_prompt=None,
+        corrective_prompt=None,
+        failed_diagrams=[],
+        time_retry_count=0,
+        validation_retry_count=0,
         current_agent=None,
         error=None,
     )

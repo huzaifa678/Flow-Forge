@@ -1,8 +1,11 @@
 """Image Generator Agent for FlowForge - supports multiple diagram types."""
 
+import base64
+import re
 import time
 from typing import Any, Optional
 
+import requests
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 from langchain_core.prompts import PromptTemplate
@@ -11,121 +14,137 @@ from src.agents.base_agent import BaseAgent
 from src.config import Config
 from src.schemas.request import DiagramType
 
+# Try to import Mermaid renderer
+try:
+    from mermaid import Mermaid
+
+    MERMAID_AVAILABLE = True
+except ImportError:
+    MERMAID_AVAILABLE = False
+    Mermaid = None
+
 
 class ImageGeneratorAgent(BaseAgent):
-    """Generate Mermaid diagrams from project plans - supports multiple diagram types."""
+    """Generate Mermaid diagrams from project plans."""
 
     DIAGRAM_TEMPLATES = {
         DiagramType.WORKFLOW: {
             "system_role": (
-                "You are an expert workflow diagram designer. "
-                "Create a comprehensive workflow diagram that shows the "
-                "end-to-end process flow, decision points, and task sequences."
+                "You are an expert workflow diagram designer."
             ),
             "requirements": (
-                "- Use flowchart syntax with clear swimlanes or sequential flow\n"
-                "- Include decision diamonds for conditional paths\n"
-                "- Show parallel processes where applicable\n"
-                "- Label all transitions and steps clearly\n"
-                "- Start and end nodes must be present"
+                "- Use flowchart syntax\n"
+                "- Include decision nodes\n"
+                "- Show process flow clearly\n"
+                "- Include start and end nodes"
             ),
         },
         DiagramType.CI_CD: {
             "system_role": (
-                "You are an expert CI/CD pipeline architect. "
-                "Create a detailed CI/CD pipeline diagram showing build, "
-                "test, staging, and deployment stages."
+                "You are an expert CI/CD architect."
             ),
             "requirements": (
-                "- Show all pipeline stages (build, test, security scan, deploy)\n"
-                "- Include branching strategies (feature, develop, main)\n"
-                "- Show artifact flows and triggers\n"
-                "- Include rollback mechanisms\n"
-                "- Use gantt or flowchart syntax"
+                "- Show build/test/deploy stages\n"
+                "- Include rollback paths\n"
+                "- Show branching strategy"
             ),
         },
         DiagramType.SYSTEM_DESIGN: {
             "system_role": (
-                "You are an expert system design architect. "
-                "Create a comprehensive system design diagram showing "
-                "all components, services, and their interactions."
+                "You are an expert system architect."
             ),
             "requirements": (
-                "- Show all microservices/services and their relationships\n"
-                "- Include databases, caches, and external services\n"
+                "- Include services/databases/caches\n"
                 "- Show data flow directions\n"
-                "- Include load balancers and API gateways\n"
-                "- Use flowchart syntax with clear component boundaries"
+                "- Include API gateways"
             ),
         },
         DiagramType.FLOWCHART: {
             "system_role": (
-                "You are an expert business process analyst. "
-                "Create a clear flowchart showing business logic and process flows."
+                "You are an expert business process analyst."
             ),
             "requirements": (
-                "- Use standard flowchart symbols\n"
-                "- Include start/end terminators\n"
-                "- Show decision points with clear yes/no paths\n"
-                "- Group related processes into subgraphs\n"
-                "- Keep flow left-to-right or top-to-bottom"
+                "- Use proper flowchart syntax\n"
+                "- Include conditional branches\n"
+                "- Use readable structure"
             ),
         },
         DiagramType.ARCHITECTURE: {
             "system_role": (
-                "You are an enterprise solution architect. "
-                "Create a comprehensive architecture diagram showing the "
-                "overall system architecture, layers, and technology choices."
+                "You are an enterprise architect."
             ),
             "requirements": (
-                "- Show layered architecture (presentation, business, data)\n"
-                "- Include technology stack annotations\n"
-                "- Show network zones and boundaries\n"
-                "- Include caching layers and message queues\n"
-                "- Use flowchart syntax with clear layer separation"
+                "- Show architecture layers\n"
+                "- Include network boundaries\n"
+                "- Show infrastructure components"
             ),
         },
         DiagramType.GANTT: {
             "system_role": (
-                "You are an expert project manager. "
-                "Create a detailed Gantt chart showing project timeline, "
-                "milestones, dependencies, and parallel work streams."
+                "You are an expert project manager."
             ),
             "requirements": (
-                "- Use gantt syntax exclusively\n"
-                "- Include project title and date sections\n"
-                "- Show task dependencies (after, before)\n"
-                "- Identify parallel work streams\n"
-                "- Include milestones and critical path"
+                "- Use gantt syntax only\n"
+                "- Include milestones\n"
+                "- Show dependencies"
             ),
         },
     }
 
     def __init__(self) -> None:
-        """Initialize the image generator agent."""
+        """Initialize image generator agent."""
         super().__init__("image_agent")
+
         self.llm: Optional[InferenceClient] = None
+
+        self.logger.info("Initializing ImageGeneratorAgent.")
+
         self._initialize_llm()
 
     def _initialize_llm(self) -> None:
         """Initialize Hugging Face LLM."""
+        self.logger.info("Initializing image generation LLM.")
+
         if not Config.HF_TOKEN:
+            self.logger.error("HF_TOKEN missing in configuration.")
             raise ValueError("HF_TOKEN must be set.")
 
         self.llm = InferenceClient(
-            model="Qwen/Qwen2.5-Coder-32B-Instruct",
+            model="deepseek-ai/DeepSeek-R1",
             token=Config.HF_TOKEN,
+        )
+
+        self.logger.info(
+            "Image generator LLM initialized successfully with model=%s",
+            "deepseek-ai/DeepSeek-R1",
         )
 
     def _extract_text(self, response: Any) -> str:
         """Safely extract text from LLM response."""
+        self.logger.info(
+            "Extracting text from response type=%s",
+            type(response).__name__,
+        )
+
         if response is None:
+            self.logger.warning("Received empty response object.")
             return ""
 
         if isinstance(response, str):
+            self.logger.info(
+                "Response is raw string with length=%d",
+                len(response),
+            )
             return response
 
-        return getattr(response, "content", str(response))
+        extracted = getattr(response, "content", str(response))
+
+        self.logger.info(
+            "Extracted response text length=%d",
+            len(extracted),
+        )
+
+        return extracted
 
     def _build_diagram_prompt(
         self,
@@ -133,16 +152,32 @@ class ImageGeneratorAgent(BaseAgent):
         diagram_type: DiagramType,
         timeline: Optional[str] = None,
     ) -> str:
-        """Build an optimized prompt for a specific diagram type."""
-        import json
+        """Build prompt for diagram generation."""
+        self.logger.info(
+            "Building prompt for diagram_type=%s",
+            diagram_type.value,
+        )
+
+        self.logger.info(
+            "Plan length=%d | Timeline length=%d",
+            len(plan),
+            len(timeline) if timeline else 0,
+        )
 
         template_config = self.DIAGRAM_TEMPLATES.get(
-            diagram_type, self.DIAGRAM_TEMPLATES[DiagramType.FLOWCHART]
+            diagram_type,
+            self.DIAGRAM_TEMPLATES[DiagramType.FLOWCHART],
         )
 
         prompt_template = PromptTemplate(
-            input_variables=["plan", "timeline", "diagram_type_name"],
-            template="""
+    input_variables=[
+        "system_role",
+        "rules",
+        "plan",
+        "timeline",
+        "diagram_type_name",
+    ],
+    template="""
 {system_role}
 
 Rules:
@@ -154,35 +189,74 @@ Plan:
 Timeline Reference:
 {timeline}
 
-Generate the complete {diagram_type_name} diagram in valid Mermaid syntax.
-Return ONLY the Mermaid code. No explanations. No markdown fences.
-""".format(
-                system_role=template_config["system_role"],
-                rules=template_config["requirements"],
-                plan=plan,
-                timeline=timeline or "No timeline provided",
-                diagram_type_name=diagram_type.value.replace("_", " ").title(),
-            ),
-        )
-        return prompt_template.format(
+Generate ONLY valid Mermaid syntax.
+Do NOT include markdown fences.
+Do NOT explain anything.
+""",
+)
+
+        formatted_prompt = prompt_template.format(
+            system_role=template_config["system_role"],
+            rules=template_config["requirements"],
             plan=plan,
-            timeline=timeline or "",
-            diagram_type_name=diagram_type.value.replace("_", " ").title(),
+            timeline=timeline or "No timeline provided",
+            diagram_type_name=diagram_type.value,
         )
+
+        self.logger.info(
+            "Prompt built successfully | length=%d",
+            len(formatted_prompt),
+        )
+
+        self.logger.info(
+            "Prompt preview:\n%s",
+            formatted_prompt[:1000],
+        )
+
+        return formatted_prompt
 
     def _parse_diagram(self, response: str) -> str:
-        """Clean and extract Mermaid diagram from LLM response."""
+        """Extract Mermaid diagram from response."""
+        self.logger.info("Parsing Mermaid diagram from LLM response.")
+
         diagram = self._extract_text(response).strip()
 
-        # Remove markdown fences if model ignores instructions
+        self.logger.info(
+            "Raw diagram length=%d",
+            len(diagram),
+        )
+
         if diagram.startswith("```"):
-            diagram = diagram.replace("```mermaid", "").replace("```", "").strip()
+            self.logger.warning(
+                "Markdown fences detected. Cleaning response."
+            )
+
+            diagram = (
+                diagram.replace("```mermaid", "")
+                .replace("```", "")
+                .strip()
+            )
+
+        self.logger.info(
+            "Parsed diagram length=%d",
+            len(diagram),
+        )
+
+        self.logger.info(
+            "Diagram preview:\n%s",
+            diagram[:1000],
+        )
 
         return diagram
 
     def _validate_diagram(self, diagram: str) -> bool:
-        """Basic validation of generated Mermaid diagram."""
+        """Validate Mermaid syntax structure."""
+        self.logger.info("Validating generated Mermaid diagram.")
+
         if not diagram or len(diagram.strip()) < 10:
+            self.logger.warning(
+                "Diagram too short or empty."
+            )
             return False
 
         valid_starts = [
@@ -196,7 +270,180 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
         ]
 
         diagram_lower = diagram.lower().strip()
-        return any(diagram_lower.startswith(v.lower()) for v in valid_starts)
+
+        self.logger.info(
+            "Diagram starts with: %s",
+            diagram_lower[:50],
+        )
+
+        is_valid = any(
+            diagram_lower.startswith(v.lower())
+            for v in valid_starts
+        )
+
+        self.logger.info(
+            "Diagram validation result=%s",
+            is_valid,
+        )
+
+        return is_valid
+
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        """Check whether error is retryable."""
+        self.logger.warning(
+            "Checking retryable status for error=%s",
+            exc,
+        )
+
+        status_code = None
+
+        if isinstance(exc, HfHubHTTPError):
+            response = getattr(exc, "response", None)
+
+            if response:
+                status_code = getattr(response, "status_code", None)
+
+            if status_code is None:
+                status_code = getattr(exc, "status_code", None)
+
+            if status_code is None and exc.args:
+                match = re.search(r"(\d{3})\s", str(exc.args[0]))
+                if match:
+                    status_code = int(match.group(1))
+
+            self.logger.warning(
+                "HF HTTP status code=%s",
+                status_code,
+            )
+
+            return status_code in (
+                408,
+                429,
+                500,
+                502,
+                503,
+                504,
+            )
+
+        if isinstance(exc, requests.exceptions.HTTPError):
+            response = getattr(exc, "response", None)
+            if response:
+                status_code = getattr(response, "status_code", None)
+            self.logger.warning(
+                "Requests HTTP status code=%s",
+                status_code,
+            )
+            return status_code in (
+                408,
+                429,
+                500,
+                502,
+                503,
+                504,
+            )
+
+        retryable = isinstance(
+            exc,
+            (TimeoutError, ConnectionError),
+        )
+
+        self.logger.warning(
+            "Retryable generic exception=%s",
+            retryable,
+        )
+
+        return retryable
+
+    def _chat_completion_with_retry(
+        self,
+        messages: list,
+        max_tokens: int,
+    ) -> Any:
+        """Execute LLM request with retries."""
+        last_exception = None
+
+        max_attempts = 3
+        base_delay = 1.0
+
+        self.logger.info(
+            "Starting diagram LLM request | max_tokens=%d",
+            max_tokens,
+        )
+
+        self.logger.info(
+            "Message preview:\n%s",
+            messages[0]["content"][:1000],
+        )
+
+        for attempt in range(max_attempts):
+            try:
+                self.logger.info(
+                    "LLM attempt %d/%d",
+                    attempt + 1,
+                    max_attempts,
+                )
+
+                start_time = time.time()
+
+                response = self.llm.chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+
+                elapsed = round(time.time() - start_time, 2)
+
+                self.logger.info(
+                    "LLM request succeeded in %.2fs",
+                    elapsed,
+                )
+
+                if hasattr(response, "choices"):
+                    content = response.choices[0].message.content
+
+                    self.logger.info(
+                        "Response content length=%d",
+                        len(content) if content else 0,
+                    )
+
+                    self.logger.info(
+                        "Response preview:\n%s",
+                        content[:1000] if content else "EMPTY",
+                    )
+
+                return response
+
+            except Exception as exc:
+                last_exception = exc
+
+                self.logger.error(
+                    "LLM request failed on attempt %d/%d | error=%s",
+                    attempt + 1,
+                    max_attempts,
+                    exc,
+                    exc_info=True,
+                )
+
+                if not self._is_retryable_error(exc):
+                    self.logger.error(
+                        "Encountered non-retryable error."
+                    )
+                    raise exc
+
+                if attempt < max_attempts - 1:
+                    delay = base_delay * (2**attempt)
+
+                    self.logger.warning(
+                        "Retrying in %.1f seconds.",
+                        delay,
+                    )
+
+                    time.sleep(delay)
+
+        self.logger.error(
+            "All LLM attempts failed."
+        )
+
+        raise last_exception
 
     def generate_diagram(
         self,
@@ -204,138 +451,207 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
         diagram_type: DiagramType,
         timeline: Optional[str] = None,
     ) -> dict[str, Any]:
-        """
-        Generate a single Mermaid diagram of the specified type.
-
-        Args:
-            plan: The project plan to base the diagram on.
-            diagram_type: The type of diagram to generate.
-            timeline: Optional timeline reference for context.
-
-        Returns:
-            Dict containing diagram data and metadata.
-        """
+        """Generate a Mermaid diagram."""
         try:
+            self.logger.info(
+                "Generating diagram type=%s",
+                diagram_type.value,
+            )
+
             if not plan:
+                self.logger.error(
+                    "Plan missing. Cannot generate diagram."
+                )
+
                 return {
                     "diagram_type": diagram_type.value,
                     "mermaid_code": None,
-                    "title": diagram_type.value.replace("_", " ").title(),
-                    "description": None,
                     "is_valid": False,
-                    "validation_feedback": "No plan provided",
                     "error": "No plan provided",
+                    "image_data": None,
                 }
 
-            prompt = self._build_diagram_prompt(plan, diagram_type, timeline)
-            response = self._chat_completion_with_retry(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
+            self.logger.info(
+                "Plan length=%d",
+                len(plan),
             )
-            diagram = self._parse_diagram(
+
+            prompt = self._build_diagram_prompt(
+                plan,
+                diagram_type,
+                timeline,
+            )
+
+            response = self._chat_completion_with_retry(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                max_tokens=700,
+            )
+
+            raw_content = (
                 response.choices[0].message.content
                 if hasattr(response, "choices")
                 else str(response)
             )
 
-            if not self._validate_diagram(diagram):
+            self.logger.info(
+                "Raw LLM content length=%d",
+                len(raw_content) if raw_content else 0,
+            )
+
+            diagram = self._parse_diagram(raw_content)
+
+            is_valid = self._validate_diagram(diagram)
+
+            if not is_valid:
+                self.logger.warning(
+                    "Generated Mermaid diagram failed validation."
+                )
+
+                self.logger.warning(
+                    "Invalid Mermaid output:\n%s",
+                    diagram,
+                )
+
                 return {
                     "diagram_type": diagram_type.value,
-                    "mermaid_code": None,
-                    "title": diagram_type.value.replace("_", " ").title(),
-                    "description": None,
+                    "mermaid_code": diagram,
                     "is_valid": False,
-                    "validation_feedback": "No valid Mermaid diagram generated",
-                    "error": "No valid diagram generated",
+                    "error": "No valid Mermaid diagram generated",
+                    "image_data": None,
                 }
+
+            self.logger.info(
+                "Diagram validated successfully."
+            )
+
+            image_data = None
+
+            if MERMAID_AVAILABLE:
+                max_render_attempts = 3
+                render_delay = 1.0
+                for render_attempt in range(max_render_attempts):
+                    try:
+                        self.logger.info(
+                            "Attempting Mermaid PNG rendering (attempt %d/%d).",
+                            render_attempt + 1,
+                            max_render_attempts,
+                        )
+
+                        mm = Mermaid(diagram)
+
+                        response = mm.img_response
+                        if response.status_code == 200:
+                            image_bytes = response.content
+
+                            image_base64 = base64.b64encode(
+                                image_bytes
+                            ).decode("utf-8")
+
+                            image_data = f"data:image/png;base64,{image_base64}"
+
+                            self.logger.info(
+                                "Diagram image rendered successfully."
+                            )
+                            break
+                        else:
+                            self.logger.warning(
+                                "Mermaid rendering failed with status %d",
+                                response.status_code,
+                            )
+                            if render_attempt < max_render_attempts - 1:
+                                time.sleep(render_delay)
+                                render_delay *= 2
+
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Failed Mermaid rendering | error=%s",
+                            exc,
+                            exc_info=True,
+                        )
+                        if render_attempt < max_render_attempts - 1:
+                            time.sleep(render_delay)
+                            render_delay *= 2
+
+            else:
+                self.logger.warning(
+                    "Mermaid renderer unavailable."
+                )
 
             return {
                 "diagram_type": diagram_type.value,
                 "mermaid_code": diagram,
                 "title": diagram_type.value.replace("_", " ").title(),
-                "description": f"Auto-generated {diagram_type.value} diagram",
+                "description": (
+                    f"Auto-generated {diagram_type.value} diagram"
+                ),
                 "is_valid": True,
                 "validation_feedback": "Diagram generated successfully",
                 "error": None,
+                "image_data": image_data,
             }
 
         except Exception as exc:
+            self.logger.error(
+                "Diagram generation failed for type=%s | error=%s",
+                diagram_type.value,
+                exc,
+                exc_info=True,
+            )
+
             return {
                 "diagram_type": diagram_type.value,
                 "mermaid_code": None,
-                "title": diagram_type.value.replace("_", " ").title(),
-                "description": None,
                 "is_valid": False,
-                "validation_feedback": None,
-                "error": f"Failed to generate {diagram_type.value} diagram: {exc}",
+                "error": (
+                    f"Failed to generate {diagram_type.value} "
+                    f"diagram: {exc}"
+                ),
+                "image_data": None,
             }
 
-    def _is_retryable_error(self, exc: Exception) -> bool:
-        """Check if an exception is retryable (timeout, server errors, etc.)."""
-        if isinstance(exc, HfHubHTTPError):
-            response = getattr(exc, "response", None)
-            if response:
-                status_code = getattr(response, "status_code", None)
-                return status_code in (408, 429, 500, 502, 503, 504)
-        return isinstance(exc, (TimeoutError, ConnectionError))
-
-    def _chat_completion_with_retry(
-        self, messages: list, max_tokens: int
-    ) -> Any:
-        """Execute chat completion with retry logic for transient failures."""
-        last_exception = None
-        max_attempts = 3
-        base_delay = 1.0
-
-        for attempt in range(max_attempts):
-            try:
-                response = self.llm.chat_completion(
-                    messages=messages,
-                    max_tokens=max_tokens,
-                )
-                return response
-            except Exception as exc:
-                last_exception = exc
-                if not self._is_retryable_error(exc):
-                    raise exc
-                if attempt < max_attempts - 1:
-                    delay = base_delay * (2**attempt)
-                    self.logger.warning(
-                        "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        max_attempts,
-                        delay,
-                        exc,
-                    )
-                    time.sleep(delay)
-
-        raise last_exception
-
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
-        """
-        Generate all requested Mermaid diagrams from plan.
-
-        Parameters
-        ----------
-        state : dict[str, Any]
-            Workflow state containing plan, timeline, and diagram types.
-
-        Returns
-        -------
-        dict[str, Any]
-            Updated workflow state with all generated diagrams.
-        """
+        """Generate all requested diagrams."""
         try:
+            self.logger.info(
+                "Starting image generation workflow."
+            )
+
             plan = state.get("plan")
             timeline = state.get("timetable")
-            diagram_types_raw = state.get("diagram_types", [DiagramType.WORKFLOW])
 
-            self.logger.info("plan: %s", plan[:100] if plan else "None")
+            diagram_types_raw = state.get(
+                "diagram_types",
+                [DiagramType.WORKFLOW],
+            )
+
+            self.logger.info(
+                "Plan exists=%s | timeline exists=%s",
+                bool(plan),
+                bool(timeline),
+            )
+
+            self.logger.info(
+                "Requested diagram types=%s",
+                diagram_types_raw,
+            )
+
             if not plan:
+                self.logger.error(
+                    "No plan provided to image generator."
+                )
+
                 return self._update_state(
                     state,
                     {
-                        "error": "Failed to generate images: no plan provided",
+                        "error": (
+                            "Failed to generate images: "
+                            "no plan provided"
+                        ),
                         "diagrams": [],
                         "current_agent": "image_agent",
                     },
@@ -343,38 +659,71 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
 
             # Parse diagram types
             if isinstance(diagram_types_raw, list):
-                if all(isinstance(d, str) for d in diagram_types_raw):
+                if all(
+                    isinstance(d, str)
+                    for d in diagram_types_raw
+                ):
                     diagram_types = [
-                        DiagramType(d) if isinstance(d, str) else d
+                        DiagramType(d)
                         for d in diagram_types_raw
                     ]
                 else:
                     diagram_types = diagram_types_raw
+
             elif isinstance(diagram_types_raw, str):
-                diagram_types = [DiagramType(diagram_types_raw)]
+                diagram_types = [
+                    DiagramType(diagram_types_raw)
+                ]
+
             else:
                 diagram_types = [DiagramType.WORKFLOW]
 
             self.logger.info(
-                "Generating %d diagrams: %s",
+                "Resolved %d diagram types.",
                 len(diagram_types),
-                [dt.value for dt in diagram_types],
             )
 
-            # Generate each diagram
             diagrams = []
-            for diagram_type in diagram_types:
+
+            for idx, diagram_type in enumerate(diagram_types):
+                self.logger.info(
+                    "Generating diagram %d/%d | type=%s",
+                    idx + 1,
+                    len(diagram_types),
+                    diagram_type.value,
+                )
+
                 diagram_result = self.generate_diagram(
                     plan=plan,
                     diagram_type=diagram_type,
                     timeline=timeline,
                 )
+
+                self.logger.info(
+                    "Diagram generation result | valid=%s | error=%s",
+                    diagram_result.get("is_valid"),
+                    diagram_result.get("error"),
+                )
+
                 diagrams.append(diagram_result)
 
-            valid_count = sum(1 for d in diagrams if d.get("is_valid"))
-            self.logger.info(
-                "Generated %d/%d valid diagrams", valid_count, len(diagrams)
+            valid_count = sum(
+                1 for d in diagrams if d.get("is_valid")
             )
+
+            self.logger.info(
+                "Generated %d/%d valid diagrams.",
+                valid_count,
+                len(diagrams),
+            )
+
+            for idx, diagram in enumerate(diagrams):
+                self.logger.info(
+                    "Diagram #%d summary | type=%s | valid=%s",
+                    idx + 1,
+                    diagram.get("diagram_type"),
+                    diagram.get("is_valid"),
+                )
 
             return self._update_state(
                 state,
@@ -382,16 +731,28 @@ Return ONLY the Mermaid code. No explanations. No markdown fences.
                     "diagrams": diagrams,
                     "diagram_count": len(diagrams),
                     "valid_diagram_count": valid_count,
-                    "error": None if valid_count > 0 else "No valid diagrams generated",
+                    "error": (
+                        None
+                        if valid_count > 0
+                        else "No valid diagrams generated"
+                    ),
                     "current_agent": "image_agent",
                 },
             )
 
         except Exception as exc:
+            self.logger.error(
+                "Image generator workflow failed | error=%s",
+                exc,
+                exc_info=True,
+            )
+
             return self._update_state(
                 state,
                 {
-                    "error": f"Image generator agent failed: {exc}",
+                    "error": (
+                        f"Image generator agent failed: {exc}"
+                    ),
                     "diagrams": [],
                     "diagram_count": 0,
                     "valid_diagram_count": 0,

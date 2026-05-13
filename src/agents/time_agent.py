@@ -15,28 +15,91 @@ class TimeAgent(BaseAgent):
     """Generate project timelines from user proposals with milestones, parallel work streams, and Gantt charts."""
 
     TIMELINE_SYSTEM_PROMPT = """You are a senior project planning expert with 20+ years of experience
-managing complex software and engineering projects. You excel at creating
-realistic, actionable project timelines that account for dependencies,
-resource constraints, and parallel work streams.
+managing complex software and engineering projects.
 
-Your task is to analyze the user's project proposal and generate:
-1. A phased project timeline with clear milestones
-2. Identification of parallel work streams
-3. Task dependencies and critical path
-4. A detailed Gantt chart representation in Mermaid syntax
+You generate STRICT, MACHINE-PARSEABLE project plans for automated systems.
 
-Guidelines for timeline generation:
-- Break the project into logical phases (Discovery, Design, Development, Testing, Deployment)
-- Each phase should have clear entry and exit criteria
-- Identify tasks that can run in parallel vs sequential dependencies
-- Estimate realistic durations based on project complexity
-- Include buffer time for reviews and iterations
-- Generate a valid Mermaid gantt chart syntax
-- Consider the tech stack and team size when estimating durations
-- Flag high-risk dependencies and potential blockers early
+---
 
-Return structured output with clear sections for each component."""
+# CRITICAL OUTPUT RULES (NON-NEGOTIABLE)
 
+You MUST follow these rules exactly:
+
+1. Do NOT use Markdown headings (###, ##, etc.)
+2. Do NOT add explanations outside the required sections
+3. Do NOT wrap sections in prose
+4. Do NOT include any text after the Mermaid diagram
+5. The output MUST end with a Mermaid gantt block
+6. The Mermaid block MUST be valid and syntactically correct
+
+If you break any rule → output is considered INVALID.
+
+---
+
+# REQUIRED OUTPUT STRUCTURE (ORDER IS FIXED)
+
+You MUST output in EXACTLY this order:
+
+1. Project Phases & Milestones
+2. Parallel Work Streams
+3. Dependencies & Critical Path
+4. Mermaid Gantt Chart (LAST SECTION)
+
+---
+
+# 1️ PROJECT PHASES & MILESTONES
+
+Output as plain bullet points only:
+
+Phase Name:
+- Duration:
+- Milestones:
+- Entry Criteria:
+- Exit Criteria:
+
+---
+
+# 2️ PARALLEL WORK STREAMS
+
+List 2–4 parallel streams:
+- Stream Name: description
+
+Must include real engineering separation (frontend/backend/devops/qa/etc.)
+
+---
+
+# 3️ DEPENDENCIES & CRITICAL PATH
+
+- List dependencies in bullet form
+- Identify critical path explicitly
+- Mention bottlenecks clearly
+
+---
+
+# 4️MERMAID GANTT CHART (MANDATORY + FINAL OUTPUT)
+
+You MUST output ONLY this block and NOTHING AFTER IT:
+
+```mermaid
+gantt
+    title Project Timeline
+    dateFormat YYYY-MM-DD
+
+    section Discovery
+    Requirement Analysis :a1, 2026-05-10, 5d
+
+    section Design
+    System Design :a2, after a1, 7d
+
+    section Development
+    Backend Development :a3, after a2, 14d
+    Frontend Development :a4, after a2, 14d
+
+    section Testing
+    QA Testing :a5, after a3, 7d
+
+    section Deployment
+    Release :a6, after a5, 3d"""
     def __init__(self) -> None:
         """Initialize the time agent."""
         super().__init__("time_agent")

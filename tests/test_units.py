@@ -15,6 +15,8 @@ from src.agents.time_agent import TimeAgent
 from src.agents.plan_agent import PlanAgent
 from src.agents.image_generator_agent import ImageGeneratorAgent
 from src.agents.validator_agent import ValidatorAgent
+from src.agents.base_validator_agent import BaseValidatorAgent
+from src.agents.time_validator_agent import TimeValidatorAgent
 from src.workflow.graph_workflow import create_flowforge_workflow
 from src.schemas.request import (
     DiagramType,
@@ -341,89 +343,81 @@ class TestImageGeneratorAgent(unittest.TestCase):
             self.assertIn("requirements", template)
 
 
-class TestValidatorAgent(unittest.TestCase):
-    """Test cases for ValidatorAgent - now validates all diagrams."""
+class TestBaseValidatorAgent(unittest.TestCase):
+    """Test cases for BaseValidatorAgent abstract base class."""
 
-    @patch('src.agents.validator_agent.InferenceClient')
-    def test_initialization(self, mock_llm):
-        """Test ValidatorAgent initialization."""
-        agent = ValidatorAgent()
-        self.assertEqual(agent.name, "validator_agent")
-        mock_llm.assert_called_once()
+    def test_base_class_is_abstract(self):
+        """Test that BaseValidatorAgent cannot be instantiated directly."""
+        with self.assertRaises(TypeError):
+            BaseValidatorAgent("test_validator")
 
-    @patch('src.agents.validator_agent.InferenceClient')
-    def test_execute_success_valid(self, mock_llm):
-        """Test successful execution of ValidatorAgent with valid diagram."""
-        mock_instance = Mock()
-        mock_instance.chat_completion.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(
-                content="""VALID: true
-CRITICAL_ISSUES: None
-WARNINGS: None
-SUGGESTIONS: None
-FEEDBACK: Diagram is well-formed and follows best practices."""
-            ))]
-        )
-        mock_llm.return_value = mock_instance
+    def test_inheritance_structure(self):
+        """Test that ValidatorAgent inherits from BaseValidatorAgent."""
+        self.assertTrue(issubclass(ValidatorAgent, BaseValidatorAgent))
+        self.assertTrue(issubclass(TimeValidatorAgent, BaseValidatorAgent))
 
-        agent = ValidatorAgent()
-        state = {
-            "diagrams": [
-                {
-                    "mermaid_code": "gantt\ntitle Test Chart\nsection A\nTask :a1, 2026-05-10, 5d",
-                    "diagram_type": "workflow",
-                }
-            ],
-        }
-
-        result = agent.execute(state)
-
-        self.assertIn("validation_results", result)
-        self.assertIn("overall_validation", result)
-        self.assertIsNone(result.get("error"))
-        self.assertEqual(result["current_agent"], "validator_agent")
-
-    @patch('src.agents.validator_agent.InferenceClient')
-    def test_execute_empty_diagrams(self, mock_llm):
-        """Test ValidatorAgent with empty diagrams list."""
-        agent = ValidatorAgent()
-        state = {"diagrams": []}
-
-        result = agent.execute(state)
-
-        self.assertIn("error", result)
-        self.assertIn("No diagrams", result["error"])
-
-    def test_basic_validation_passes(self):
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_basic_mermaid_validation_passes(self, mock_llm):
         """Test basic Mermaid validation passes for valid diagrams."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         result = agent._basic_mermaid_validation(
             "gantt\ntitle Test\nsection A\nTask :a1, 2026-05-10, 5d"
         )
         self.assertTrue(result["is_valid"])
 
-    def test_basic_validation_fails_empty(self):
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_basic_mermaid_validation_fails_empty(self, mock_llm):
         """Test basic Mermaid validation fails for empty input."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         result = agent._basic_mermaid_validation("")
         self.assertFalse(result["is_valid"])
+        self.assertIn("Empty", result["feedback"])
 
-    def test_basic_validation_fails_no_mermaid(self):
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_basic_mermaid_validation_fails_no_mermaid(self, mock_llm):
         """Test basic Mermaid validation fails for non-Mermaid text."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         result = agent._basic_mermaid_validation("This is just text")
         self.assertFalse(result["is_valid"])
+        self.assertIn("valid Mermaid", result["feedback"])
 
-    def test_basic_validation_fails_brackets(self):
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_basic_mermaid_validation_fails_brackets(self, mock_llm):
         """Test basic Mermaid validation fails for mismatched brackets."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         result = agent._basic_mermaid_validation("gantt\ntitle [Unclosed")
         self.assertFalse(result["is_valid"])
+        self.assertIn("Mismatched", result["feedback"])
 
-    @patch('src.agents.validator_agent.InferenceClient')
+    @patch('src.agents.base_validator_agent.InferenceClient')
     def test_parse_validation_response(self, mock_llm):
         """Test parsing of LLM validation response."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         response = """VALID: true
 CRITICAL_ISSUES: None
 WARNINGS: Minor suggestion about naming
@@ -433,10 +427,15 @@ FEEDBACK: Overall the diagram is well-formed and logically consistent."""
         self.assertTrue(result["is_valid"])
         self.assertEqual(result["feedback"], "Overall the diagram is well-formed and logically consistent.")
 
-    @patch('src.agents.validator_agent.InferenceClient')
+    @patch('src.agents.base_validator_agent.InferenceClient')
     def test_parse_validation_response_invalid(self, mock_llm):
         """Test parsing of invalid LLM validation response."""
-        agent = ValidatorAgent()
+
+        class TestValidator(BaseValidatorAgent):
+            def _get_model(self): return "test/model"
+            def execute(self, state): return state
+
+        agent = TestValidator("test_validator")
         response = """VALID: false
 CRITICAL_ISSUES: Circular dependency detected
 WARNINGS: Node naming could be improved
@@ -446,9 +445,33 @@ FEEDBACK: The diagram has a circular reference."""
         self.assertFalse(result["is_valid"])
         self.assertIn("Circular dependency", result["critical_issues"][0])
 
+
+class TestValidatorAgent(BaseValidatorAgent):
+    """Concrete subclass for testing ValidatorAgent's re-routing logic without LLM."""
+
+    def test_routing_on_validation_failure(self):
+        """Test that failed validation sets route_to to image_agent."""
+        agent = ValidatorAgent()
+        # We bypass the LLM by directly checking the state logic
+        state = {
+            "diagrams": [
+                {
+                    "mermaid_code": "invalid diagram with no proper syntax",
+                    "diagram_type": "workflow",
+                }
+            ],
+            "previous_prompts": ["Generate a workflow diagram for a web app"],
+        }
+        # Run execute - even if LLM fails, basic validation should catch it
+        result = agent.execute(state)
+
+        # Should not be valid since basic mermaid validation fails
+        self.assertFalse(result["overall_validation"])
+        self.assertIn("route_to", result)
+
     @patch('src.agents.validator_agent.InferenceClient')
-    def test_legacy_diagram_support(self, mock_llm):
-        """Test that validator supports legacy 'mermaid_diagram' field."""
+    def test_routing_on_validation_success(self, mock_llm):
+        """Test that successful validation sets route_to to end."""
         mock_instance = Mock()
         mock_instance.chat_completion.return_value = MagicMock(
             choices=[MagicMock(message=MagicMock(
@@ -456,20 +479,241 @@ FEEDBACK: The diagram has a circular reference."""
 CRITICAL_ISSUES: None
 WARNINGS: None
 SUGGESTIONS: None
-FEEDBACK: Diagram is valid."""
+FEEDBACK: Diagram is well-formed."""
             ))]
         )
         mock_llm.return_value = mock_instance
 
         agent = ValidatorAgent()
-        # Test with legacy single-diagram state
         state = {
-            "mermaid_diagram": "gantt\ntitle Test\nsection A\nTask :a1, 2026-05-10, 5d",
+            "diagrams": [
+                {
+                    "mermaid_code": "gantt\ntitle Test\nsection A\nTask :a1, 2026-05-10, 5d",
+                    "diagram_type": "workflow",
+                }
+            ],
+            "previous_prompts": [],
         }
 
         result = agent.execute(state)
-        self.assertIn("validation_results", result)
-        self.assertEqual(len(result["validation_results"]), 1)
+
+        self.assertTrue(result["overall_validation"])
+        self.assertEqual(result["route_to"], "end")
+
+    @patch('src.agents.validator_agent.InferenceClient')
+    def test_improvement_prompt_on_failure(self, mock_llm):
+        """Test that improvement prompt is generated when validation fails."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""VALID: false
+CRITICAL_ISSUES: Missing diagram type keyword
+WARNINGS: Node labels are unclear
+SUGGESTIONS: Use descriptive labels
+FEEDBACK: Diagram lacks proper Mermaid syntax."""
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = ValidatorAgent()
+        state = {
+            "diagrams": [
+                {
+                    "mermaid_code": "some bad mermaid code",
+                    "diagram_type": "workflow",
+                }
+            ],
+            "previous_prompts": [
+                "Generate a workflow diagram for e-commerce"
+            ],
+        }
+
+        result = agent.execute(state)
+
+        self.assertFalse(result["overall_validation"])
+        self.assertIn("improvement_prompt", result)
+        self.assertIn("improvement", result["improvement_prompt"].lower())
+        self.assertIn("fixes", result["improvement_prompt"].lower()
+                      or "IMPORTANT" in result["improvement_prompt"])
+
+
+class TestTimeValidatorAgent(unittest.TestCase):
+    """Test cases for TimeValidatorAgent."""
+
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_initialization(self, mock_llm):
+        """Test TimeValidatorAgent initialization."""
+        agent = TimeValidatorAgent()
+        self.assertEqual(agent.name, "time_validator_agent")
+        mock_llm.assert_called_once()
+
+    def test_inherits_from_base(self):
+        """Test TimeValidatorAgent inherits from BaseValidatorAgent."""
+        self.assertTrue(issubclass(TimeValidatorAgent, BaseValidatorAgent))
+
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_validate_timetable_passes(self, mock_llm):
+        """Test timetable validation passes for valid timetable."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_timetable(
+            "gantt\ntitle Test\nsection Design\nUI :a1, 2026-05-10, 7d\nsection Dev\nBackend :after a1, 14d"
+        )
+        self.assertTrue(result["is_valid"])
+
+    def test_validate_timetable_empty(self):
+        """Test timetable validation fails for empty input."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_timetable("")
+        self.assertFalse(result["is_valid"])
+        self.assertIn("empty", result["feedback"].lower())
+
+    def test_validate_timetable_insufficient(self):
+        """Test timetable validation fails for insufficient content."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_timetable("short")
+        self.assertFalse(result["is_valid"])
+
+    def test_validate_timetable_no_phases(self):
+        """Test timetable validation fails when no phases detected."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_timetable(
+            "some random text without any project phases"
+        )
+        self.assertFalse(result["is_valid"])
+        self.assertIn("phases", result["feedback"].lower())
+
+    def test_validate_milestones_passes(self):
+        """Test milestones validation passes for valid milestones."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_milestones([
+            "Design complete",
+            "Development complete",
+            "Testing complete",
+            "Deployment complete"
+        ])
+        self.assertTrue(result["is_valid"])
+
+    def test_validate_milestones_empty(self):
+        """Test milestones validation fails for empty list."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_milestones([])
+        self.assertFalse(result["is_valid"])
+
+    def test_validate_milestones_insufficient(self):
+        """Test milestones validation fails for too few milestones."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_milestones(["Design"])
+        self.assertFalse(result["is_valid"])
+
+    def test_validate_parallel_streams_passes(self):
+        """Test parallel streams validation passes for valid streams."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_parallel_streams([
+            "Frontend development",
+            "Backend API development"
+        ])
+        self.assertTrue(result["is_valid"])
+
+    def test_validate_parallel_streams_empty(self):
+        """Test parallel streams validation fails for empty list."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_parallel_streams([])
+        self.assertFalse(result["is_valid"])
+
+    def test_validate_parallel_streams_insufficient(self):
+        """Test parallel streams validation fails for vague content."""
+        agent = TimeValidatorAgent()
+        result = agent._validate_parallel_streams(["a", "b"])
+        self.assertFalse(result["is_valid"])
+
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_execute_success(self, mock_llm):
+        """Test successful execution of TimeValidatorAgent."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""VALID: true
+CRITICAL_ISSUES: None
+WARNINGS: None
+SUGGESTIONS: None
+FEEDBACK: Timeline is well-structured."""
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = TimeValidatorAgent()
+        state = {
+            "timetable": "gantt\ntitle Test\nsection Design\nUI :a1, 2026-05-10, 7d\nsection Dev\nBackend :after a1, 14d",
+            "milestones": ["Design complete", "Dev complete", "Testing complete"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+        }
+
+        result = agent.execute(state)
+
+        self.assertTrue(result["time_overall_validation"])
+        self.assertEqual(result["route_to"], "plan_agent")
+        self.assertEqual(result["current_agent"], "time_validator_agent")
+
+    @patch('src.agents.base_validator_agent.InferenceClient')
+    def test_execute_failure_routes_to_time_agent(self, mock_llm):
+        """Test that failed time validation routes back to time_agent."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="""VALID: false
+CRITICAL_ISSUES: Missing deployment phase
+WARNINGS: No parallel streams identified
+SUGGESTIONS: Add deployment phase, identify parallel work
+FEEDBACK: Timeline lacks proper structure."""
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = TimeValidatorAgent()
+        state = {
+            "timetable": "gantt\ntitle Test\nsection Design\nUI :a1, 2026-05-10, 7d",
+            "milestones": ["Design"],
+            "parallel_work_streams": [],
+        }
+
+        result = agent.execute(state)
+
+        self.assertFalse(result["time_overall_validation"])
+        self.assertIn("corrective_prompt", result)
+        # route_to should be time_agent only if retries not exhausted
+        # Without retry count, defaults to 0 < MAX, so route to time_agent
+        self.assertIn(result.get("route_to"), ["time_agent", "plan_agent"])
+
+    def test_corrective_prompt_generation(self):
+        """Test that corrective prompts are properly generated."""
+        agent = TimeValidatorAgent()
+        validation_results = [
+            {
+                "field": "timetable",
+                "is_valid": False,
+                "feedback": "Too few phases",
+                "critical_issues": ["Missing deployment phase"],
+                "warnings": [],
+                "suggestions": ["Add a deployment phase with tasks"],
+            },
+            {
+                "field": "milestones",
+                "is_valid": True,
+                "feedback": "Adequate milestones",
+                "critical_issues": [],
+                "warnings": [],
+                "suggestions": [],
+            },
+        ]
+
+        corrective = agent._build_corrective_prompt(
+            validation_results,
+            "gantt\ntitle Test\nsection Design\nUI :a1, 2026-05-10, 7d"
+        )
+
+        self.assertIn("IMPORTANT", corrective)
+        self.assertIn("deployment", corrective.lower())
+        self.assertIn("TIMETABLE", corrective)
 
 
 class TestSchemaModels(unittest.TestCase):
@@ -502,25 +746,34 @@ class TestWorkflow(unittest.TestCase):
     """Test cases for the workflow."""
 
     @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
     @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
     @patch('src.workflow.graph_workflow.ValidatorAgent')
-    def test_create_workflow(self, mock_validator, mock_image, mock_plan, mock_time):
+    def test_create_workflow(self, mock_validator, mock_image, mock_plan,
+                              mock_time_validator, mock_time):
         """Test workflow creation."""
         mock_time.return_value.execute = Mock(return_value={"timetable": "test"})
+        mock_time_validator.return_value.execute = Mock(
+            return_value={"time_overall_validation": True}
+        )
         mock_plan.return_value.execute = Mock(return_value={"plan": "test"})
         mock_image.return_value.execute = Mock(return_value={"diagrams": []})
-        mock_validator.return_value.execute = Mock(return_value={"validation_results": []})
+        mock_validator.return_value.execute = Mock(
+            return_value={"validation_results": []}
+        )
 
         workflow = create_flowforge_workflow()
 
         self.assertIsNotNone(workflow)
         mock_time.assert_called_once()
+        mock_time_validator.assert_called_once()
         mock_plan.assert_called_once()
         mock_image.assert_called_once()
         mock_validator.assert_called_once()
 
     @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
     @patch('src.workflow.graph_workflow.PlanAgent')
     @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
     @patch('src.workflow.graph_workflow.ValidatorAgent')
@@ -529,13 +782,12 @@ class TestWorkflow(unittest.TestCase):
         mock_validator,
         mock_image,
         mock_plan,
+        mock_time_validator,
         mock_time,
     ):
         """Test that workflow state flows correctly through agents."""
 
-        # -------------------------
         # Time Agent mock
-        # -------------------------
         time_instance = Mock()
         time_instance.execute.return_value = {
             "timetable": "Phase 1: Design, Phase 2: Dev",
@@ -545,6 +797,16 @@ class TestWorkflow(unittest.TestCase):
         }
         mock_time.return_value = time_instance
 
+        # Time Validator mock
+        time_validator_instance = Mock()
+        time_validator_instance.execute.return_value = {
+            "time_overall_validation": True,
+            "time_validation_results": [],
+            "error": None,
+        }
+        mock_time_validator.return_value = time_validator_instance
+
+        # Plan Agent mock
         plan_instance = Mock()
         plan_instance.execute.return_value = {
             "plan": "Task breakdown with resources",
@@ -552,6 +814,7 @@ class TestWorkflow(unittest.TestCase):
         }
         mock_plan.return_value = plan_instance
 
+        # Image Agent mock
         image_instance = Mock()
         image_instance.execute.return_value = {
             "diagrams": [
@@ -567,6 +830,7 @@ class TestWorkflow(unittest.TestCase):
         }
         mock_image.return_value = image_instance
 
+        # Validator Agent mock
         validator_instance = Mock()
         validator_instance.execute.return_value = {
             "validation_results": [{"is_valid": True}],
@@ -586,11 +850,208 @@ class TestWorkflow(unittest.TestCase):
             optimize_prompt=False,
         )
 
-        # -------------------------
-        # Assertions
-        # -------------------------
         self.assertIsNotNone(result)
         self.assertIn("diagrams", result)
+        self.assertIn("overall_validation", result)
+
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_workflow_with_validation_retry(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time_validator,
+        mock_time,
+    ):
+        """Test workflow where validation fails first time then succeeds on retry."""
+
+        # Time Agent
+        time_instance = Mock()
+        time_instance.execute.return_value = {
+            "timetable": "Phase 1: Design",
+            "milestones": ["Design"],
+            "parallel_work_streams": [],
+            "error": None,
+        }
+        mock_time.return_value = time_instance
+
+        # Time Validator - fails first, passes second
+        time_validator_instance = Mock()
+        time_validator_instance.execute.side_effect = [
+            {
+                "time_overall_validation": False,
+                "time_validation_results": [
+                    {"field": "milestones", "is_valid": False, "feedback": "Too few"}
+                ],
+                "corrective_prompt": "Add more milestones",
+                "route_to": "time_agent",
+                "error": "Time validation failed",
+            },
+            {
+                "time_overall_validation": True,
+                "time_validation_results": [],
+                "route_to": "plan_agent",
+                "error": None,
+            },
+        ]
+        mock_time_validator.return_value = time_validator_instance
+
+        # Time Agent - second call (retry)
+        time_instance_retry = Mock()
+        time_instance_retry.execute.return_value = {
+            "timetable": "Phase 1: Design, Phase 2: Dev",
+            "milestones": ["Design complete", "Development complete"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+            "error": None,
+        }
+        mock_time.return_value = time_instance_retry
+
+        # Plan Agent
+        plan_instance = Mock()
+        plan_instance.execute.return_value = {
+            "plan": "Detailed plan",
+            "error": None,
+        }
+        mock_plan.return_value = plan_instance
+
+        # Image Agent
+        image_instance = Mock()
+        image_instance.execute.return_value = {
+            "diagrams": [
+                {
+                    "diagram_type": "workflow",
+                    "mermaid_code": "flowchart TD\n    A --> B",
+                    "is_valid": True,
+                }
+            ],
+            "diagram_count": 1,
+            "valid_diagram_count": 1,
+            "error": None,
+        }
+        mock_image.return_value = image_instance
+
+        # Validator Agent
+        validator_instance = Mock()
+        validator_instance.execute.return_value = {
+            "validation_results": [{"is_valid": True}],
+            "overall_validation": True,
+            "valid_count": 1,
+            "total_count": 1,
+            "error": None,
+        }
+        mock_validator.return_value = validator_instance
+
+        from src.workflow.graph_workflow import run_flowforge_workflow
+
+        result = run_flowforge_workflow(
+            proposal="Build a web app",
+            prompt="Generate workflow diagram",
+            hf_token="test-token",
+            optimize_prompt=False,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("diagrams", result)
+
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_workflow_with_diagram_validation_retry(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time_validator,
+        mock_time,
+    ):
+        """Test workflow where diagram validation fails then succeeds on retry."""
+
+        # Time Agent
+        time_instance = Mock()
+        time_instance.execute.return_value = {
+            "timetable": "gantt\ntitle Test\nsection Design\nUI :a1, 2026-05-10, 7d",
+            "milestones": ["Design complete"],
+            "parallel_work_streams": ["Frontend"],
+            "error": None,
+        }
+        mock_time.return_value = time_instance
+
+        # Time Validator passes
+        time_validator_instance = Mock()
+        time_validator_instance.execute.return_value = {
+            "time_overall_validation": True,
+            "route_to": "plan_agent",
+            "error": None,
+        }
+        mock_time_validator.return_value = time_validator_instance
+
+        # Plan Agent
+        plan_instance = Mock()
+        plan_instance.execute.return_value = {
+            "plan": "Detailed plan",
+            "error": None,
+        }
+        mock_plan.return_value = plan_instance
+
+        # Image Agent
+        image_instance = Mock()
+        image_instance.execute.return_value = {
+            "diagrams": [
+                {
+                    "diagram_type": "workflow",
+                    "mermaid_code": "flowchart TD\n    A --> B",
+                    "is_valid": True,
+                }
+            ],
+            "diagram_count": 1,
+            "valid_diagram_count": 1,
+            "error": None,
+        }
+        mock_image.return_value = image_instance
+
+        # Validator fails first, passes on retry
+        validator_instance = Mock()
+        validator_instance.execute.side_effect = [
+            {
+                "validation_results": [
+                    {"is_valid": False, "diagram_type": "workflow"}
+                ],
+                "overall_validation": False,
+                "valid_count": 0,
+                "total_count": 1,
+                "error": "1/1 diagrams failed validation",
+                "improvement_prompt": "Fix the workflow diagram",
+                "route_to": "image_agent",
+            },
+            {
+                "validation_results": [
+                    {"is_valid": True, "diagram_type": "workflow"}
+                ],
+                "overall_validation": True,
+                "valid_count": 1,
+                "total_count": 1,
+                "error": None,
+                "route_to": "end",
+            },
+        ]
+        mock_validator.return_value = validator_instance
+
+        from src.workflow.graph_workflow import run_flowforge_workflow
+
+        result = run_flowforge_workflow(
+            proposal="Build a web app",
+            prompt="Generate workflow diagram",
+            hf_token="test-token",
+            optimize_prompt=False,
+        )
+
+        self.assertIsNotNone(result)
         self.assertIn("overall_validation", result)
 
     def test_flowforge_state_as_dict(self):

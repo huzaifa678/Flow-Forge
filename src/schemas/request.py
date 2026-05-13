@@ -98,6 +98,7 @@ class DiagramResponse(BaseModel):
     description: str
     is_valid: bool
     validation_feedback: Optional[str] = None
+    image_data: Optional[str] = None
 
 
 class TimelineOutput(BaseModel):

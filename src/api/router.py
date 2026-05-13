@@ -1,7 +1,9 @@
 """FastAPI router for FlowForge diagram generation endpoints."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from src import app
 from src.api.dependencies import get_hf_token
 from src.logger import setup_logger
 from src.schema.helpers import format_workflow_response
