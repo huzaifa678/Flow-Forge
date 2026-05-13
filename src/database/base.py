@@ -2,8 +2,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import QueuePool, create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
-
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from src.config import Config
 
@@ -11,6 +10,7 @@ Base = declarative_base()
 
 _engine = None
 _SessionLocal = None
+
 
 def get_engine():
     global _engine
@@ -28,6 +28,7 @@ def get_engine():
 
     return _engine
 
+
 def get_session_local():
     global _SessionLocal
 
@@ -42,18 +43,23 @@ def get_session_local():
 
     return _SessionLocal
 
-SessionLocal = get_session_local()
+
+# compatibility alias
+SessionLocal = get_session_local
 
 
 @contextmanager
 def get_db():
-    db = get_session_local()
+    db = get_session_local()()
+
     try:
         yield db
         db.commit()
+
     except Exception:
         db.rollback()
         raise
+
     finally:
         get_session_local().remove()
 
@@ -64,4 +70,6 @@ def init_db():
 
 def close_db():
     get_session_local().remove()
-    get_engine().dispose()
+
+    if _engine is not None:
+        _engine.dispose()
