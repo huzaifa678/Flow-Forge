@@ -1,4 +1,6 @@
 """Optimized prompt model."""
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -9,4 +11,4 @@ class OptimizedPrompt(BaseModel):
     optimized_prompt: str
     optimization_technique: str
     confidence_score: float = 0.0
-    metadata: dict | None = None
+    metadata: Optional[dict] = None

@@ -1,4 +1,5 @@
 """Response models for FlowForge API."""
+from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
@@ -32,6 +33,7 @@ class DiagramResponse(BaseModel):
     mermaid_code: str
     is_valid: bool
     validation_feedback: Optional[str] = None
+    image_data: Optional[str] = None
 
 
 class TimelineResponse(BaseModel):
