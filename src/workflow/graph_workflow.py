@@ -23,6 +23,7 @@ from src.agents.image_generator_agent import ImageGeneratorAgent
 from src.agents.validator_agent import ValidatorAgent
 from src.agents.time_validator_agent import TimeValidatorAgent
 from src.pipeline.prompt_optimizer import PromptOptimizer
+from src.database.session_manager import SessionManager
 
 
 # Max retries to prevent infinite loops
@@ -143,20 +144,27 @@ def route_validator(state: FlowForgeState) -> str:
     return "image_agent"
 
 
-def create_flowforge_workflow() -> StateGraph:
+def create_flowforge_workflow(
+    session_manager: Optional[SessionManager] = None,
+) -> StateGraph:
     """
     Create and configure the FlowForge LangGraph workflow.
+
+    Parameters
+    ----------
+    session_manager : SessionManager, optional
+        Session manager for database persistence.
 
     Returns
     -------
         StateGraph: Configured workflow graph
     """
-    # Initialize agents
-    time_agent = TimeAgent()
-    time_validator_agent = TimeValidatorAgent()
-    plan_agent = PlanAgent()
-    image_agent = ImageGeneratorAgent()
-    validator_agent = ValidatorAgent()
+    # Initialize agents with session manager
+    time_agent = TimeAgent(session_manager=session_manager)
+    time_validator_agent = TimeValidatorAgent(session_manager=session_manager)
+    plan_agent = PlanAgent(session_manager=session_manager)
+    image_agent = ImageGeneratorAgent(session_manager=session_manager)
+    validator_agent = ValidatorAgent(session_manager=session_manager)
 
     # Define the workflow
     workflow = StateGraph(FlowForgeState)
@@ -236,12 +244,6 @@ def get_optimizer() -> PromptOptimizer:
     return _optimizer
 
 
-def _increment_retry(state: FlowForgeState, key: str) -> dict[str, Any]:
-    """Increment a retry counter in the state."""
-    count = state.get(key, 0)
-    return {key: count + 1}
-
-
 def run_flowforge_workflow(
     proposal: str,
     prompt: str,
@@ -254,6 +256,7 @@ def run_flowforge_workflow(
     diagram_types: list[str] | None = None,
     optimize_prompt: bool = True,
     max_retries: int = 3,
+    session_manager: Optional[SessionManager] = None,
 ) -> FlowForgeState:
     """
     Execute the FlowForge workflow with given inputs.
@@ -270,6 +273,7 @@ def run_flowforge_workflow(
         diagram_types: List of diagram types to generate
         optimize_prompt: Whether to apply LangChain prompt optimization
         max_retries: Maximum retry attempts for validation loops
+        session_manager: Session manager for database persistence
 
     Returns:
         FlowForgeState: Final state after workflow execution
@@ -278,7 +282,6 @@ def run_flowforge_workflow(
     MAX_VALIDATION_RETRIES = max_retries
     MAX_TIME_RETRIES = max_retries
 
-    # Step 0: Prompt optimization with LangChain
     optimized_prompt = None
     working_prompt = prompt
 
@@ -289,16 +292,26 @@ def run_flowforge_workflow(
             working_prompt = optimization_result["optimized_prompt"]
             optimized_prompt = working_prompt
         except Exception as exc:
-            # Log but continue with original prompt if optimization fails
             import logging
-
             logger = logging.getLogger("app")
-            logger.warning(
-                "Prompt optimization failed, using original prompt: %s", exc
-            )
+            logger.warning("Prompt optimization failed, using original prompt: %s", exc)
 
-    # Build the initial workflow state
-    workflow = create_flowforge_workflow().compile()
+    if not session_manager:
+        session_manager = SessionManager()
+        session_manager.create_session(
+            proposal=proposal,
+            prompt=prompt,
+            project_title=project_title,
+            timeline_weeks=timeline_weeks,
+            team_size=team_size,
+            tech_stack=tech_stack,
+            priority=priority,
+            diagram_types=diagram_types,
+        )
+
+    workflow = create_flowforge_workflow(
+        session_manager=session_manager
+    ).compile()
 
     initial_state = FlowForgeState(
         proposal=proposal,

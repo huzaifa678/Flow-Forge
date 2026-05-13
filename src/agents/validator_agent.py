@@ -1,8 +1,9 @@
 """Validator Agent for FlowForge - validates Mermaid diagrams with refined checks."""
 
-from typing import Any
+from typing import Any, Optional
 
 from src.agents.base_validator_agent import BaseValidatorAgent
+
 
 class ValidatorAgent(BaseValidatorAgent):
     """Validate Mermaid diagrams for syntax correctness and best practices.
@@ -11,9 +12,9 @@ class ValidatorAgent(BaseValidatorAgent):
     so the workflow re-routes to the image generator with improvement feedback.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize validator agent."""
-        super().__init__("validator_agent")
+        super().__init__("validator_agent", session_manager=session_manager)
 
     def _get_model(self) -> str:
         """Return the HuggingFace model identifier."""
@@ -163,7 +164,7 @@ class ValidatorAgent(BaseValidatorAgent):
             )
 
             if all_valid:
-                return self._update_state(
+                result_state = self._update_state(
                     state,
                     {
                         "validation_results": validation_results,
@@ -181,7 +182,7 @@ class ValidatorAgent(BaseValidatorAgent):
                     invalid_diagrams, previous_prompts
                 )
 
-                return self._update_state(
+                result_state = self._update_state(
                     state,
                     {
                         "validation_results": validation_results,
@@ -198,6 +199,20 @@ class ValidatorAgent(BaseValidatorAgent):
                         "current_agent": "validator_agent",
                     },
                 )
+
+            self._save_session_output(
+                output_type="validation_results",
+                output_data={
+                    "validation_results": validation_results,
+                    "overall_validation": result_state.get("overall_validation"),
+                    "valid_count": valid_count,
+                    "total_count": len(validation_results),
+                },
+                feedback=result_state.get("error"),
+                is_valid=result_state.get("overall_validation", False),
+            )
+
+            return result_state
 
         except Exception as exc:
             error_msg = f"Validator agent failed: {exc}"

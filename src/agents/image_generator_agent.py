@@ -14,10 +14,8 @@ from src.agents.base_agent import BaseAgent
 from src.config import Config
 from src.schemas.request import DiagramType
 
-# Try to import Mermaid renderer
 try:
     from mermaid import Mermaid
-
     MERMAID_AVAILABLE = True
 except ImportError:
     MERMAID_AVAILABLE = False
@@ -91,9 +89,9 @@ class ImageGeneratorAgent(BaseAgent):
         },
     }
 
-    def __init__(self) -> None:
+    def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize image generator agent."""
-        super().__init__("image_agent")
+        super().__init__("image_agent", session_manager=session_manager)
 
         self.llm: Optional[InferenceClient] = None
 
@@ -624,6 +622,11 @@ Do NOT explain anything.
             plan = state.get("plan")
             timeline = state.get("timetable")
 
+            improvement_prompt = state.get("improvement_prompt")
+            if improvement_prompt:
+                self.logger.info("Using improvement prompt for regeneration")
+                plan = f"{plan}\n\n--- IMPROVEMENT FEEDBACK ---\n{improvement_prompt}"
+
             diagram_types_raw = state.get(
                 "diagram_types",
                 [DiagramType.WORKFLOW],
@@ -685,6 +688,12 @@ Do NOT explain anything.
 
             diagrams = []
 
+            previous_invalid = self._get_previous_invalid_output("diagrams")
+            if previous_invalid:
+                self.logger.info(
+                    "Found previous invalid output for reference"
+                )
+
             for idx, diagram_type in enumerate(diagram_types):
                 self.logger.info(
                     "Generating diagram %d/%d | type=%s",
@@ -725,7 +734,7 @@ Do NOT explain anything.
                     diagram.get("is_valid"),
                 )
 
-            return self._update_state(
+            result_state = self._update_state(
                 state,
                 {
                     "diagrams": diagrams,
@@ -739,6 +748,19 @@ Do NOT explain anything.
                     "current_agent": "image_agent",
                 },
             )
+
+            self._save_session_output(
+                output_type="diagrams",
+                output_data={
+                    "diagrams": diagrams,
+                    "diagram_count": len(diagrams),
+                    "valid_diagram_count": valid_count,
+                },
+                feedback=result_state.get("error"),
+                is_valid=valid_count > 0,
+            )
+
+            return result_state
 
         except Exception as exc:
             self.logger.error(
