@@ -348,6 +348,9 @@ Return ONLY the requested format.
         """
         import re
 
+        # Strip DeepSeek-R1 <think>...</think> reasoning blocks
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
         # Try to find ```mermaid ... ``` block
         mermaid_pattern = r"```mermaid\s*(.*?)\s*```"
         match = re.search(mermaid_pattern, text, re.DOTALL | re.IGNORECASE)
@@ -368,7 +371,16 @@ Return ONLY the requested format.
                 self.logger.info("Extracted Mermaid code from generic fenced block.")
                 return block.strip()
 
-        # No fenced code block found; return original text
+        # No fenced code block found; try to find the diagram start in raw text
+        valid_starts = ["gantt", "flowchart", "graph", "sequenceDiagram",
+                        "classDiagram", "stateDiagram", "erDiagram", "pie", "journey", "gitGraph"]
+        lines = text.strip().split("\n")
+        for i, line in enumerate(lines):
+            if any(line.strip().lower().startswith(v.lower()) for v in valid_starts):
+                extracted = "\n".join(lines[i:]).strip()
+                self.logger.info("Extracted Mermaid code by finding diagram keyword in raw text.")
+                return extracted
+
         self.logger.info("No Mermaid code fences found, using raw text.")
         return text.strip()
 

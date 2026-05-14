@@ -219,31 +219,31 @@ Do NOT explain anything.
 
         diagram = self._extract_text(response).strip()
 
-        self.logger.info(
-            "Raw diagram length=%d",
-            len(diagram),
-        )
+        self.logger.info("Raw diagram length=%d", len(diagram))
 
-        if diagram.startswith("```"):
-            self.logger.warning(
-                "Markdown fences detected. Cleaning response."
-            )
+        # Strip DeepSeek-R1 <think>...</think> reasoning blocks
+        diagram = re.sub(r"<think>.*?</think>", "", diagram, flags=re.DOTALL).strip()
 
+        # Extract from ```mermaid ... ``` fences if present
+        if "```" in diagram:
+            self.logger.warning("Markdown fences detected. Cleaning response.")
             diagram = (
                 diagram.replace("```mermaid", "")
                 .replace("```", "")
                 .strip()
             )
 
-        self.logger.info(
-            "Parsed diagram length=%d",
-            len(diagram),
-        )
+        # If there's preamble before the diagram keyword, strip it
+        valid_starts = ["gantt", "flowchart", "graph", "sequenceDiagram",
+                        "classDiagram", "stateDiagram", "erDiagram", "pie", "journey", "gitGraph"]
+        lines = diagram.split("\n")
+        for i, line in enumerate(lines):
+            if any(line.strip().lower().startswith(v.lower()) for v in valid_starts):
+                diagram = "\n".join(lines[i:]).strip()
+                break
 
-        self.logger.info(
-            "Diagram preview:\n%s",
-            diagram[:1000],
-        )
+        self.logger.info("Parsed diagram length=%d", len(diagram))
+        self.logger.info("Diagram preview:\n%s", diagram[:1000])
 
         return diagram
 
@@ -539,46 +539,28 @@ Do NOT explain anything.
                             render_attempt + 1,
                             max_render_attempts,
                         )
-
+                        # Mermaid() constructor calls _make_request_to_mermaid()
+                        # which sets img_response; raises MermaidError on failure
                         mm = Mermaid(diagram)
-
-                        response = mm.img_response
-                        if response.status_code == 200:
-                            image_bytes = response.content
-
-                            image_base64 = base64.b64encode(
-                                image_bytes
-                            ).decode("utf-8")
-
-                            image_data = f"data:image/png;base64,{image_base64}"
-
-                            self.logger.info(
-                                "Diagram image rendered successfully."
-                            )
-                            break
-                        else:
-                            self.logger.warning(
-                                "Mermaid rendering failed with status %d",
-                                response.status_code,
-                            )
-                            if render_attempt < max_render_attempts - 1:
-                                time.sleep(render_delay)
-                                render_delay *= 2
+                        image_bytes = mm.img_response.content
+                        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+                        image_data = f"data:image/png;base64,{image_base64}"
+                        self.logger.info("Diagram image rendered successfully.")
+                        break
 
                     except Exception as exc:
                         self.logger.warning(
-                            "Failed Mermaid rendering | error=%s",
+                            "Failed Mermaid rendering (attempt %d/%d) | error=%s",
+                            render_attempt + 1,
+                            max_render_attempts,
                             exc,
-                            exc_info=True,
                         )
                         if render_attempt < max_render_attempts - 1:
                             time.sleep(render_delay)
                             render_delay *= 2
 
             else:
-                self.logger.warning(
-                    "Mermaid renderer unavailable."
-                )
+                self.logger.warning("Mermaid renderer unavailable.")
 
             return {
                 "diagram_type": diagram_type.value,
