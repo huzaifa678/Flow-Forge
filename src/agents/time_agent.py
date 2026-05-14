@@ -5,7 +5,6 @@ from typing import Any, Optional
 
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
-from langchain_core.prompts import PromptTemplate
 
 from src.agents.base_agent import BaseAgent
 from src.config import Config
@@ -14,75 +13,30 @@ from src.config import Config
 class TimeAgent(BaseAgent):
     """Generate project timelines from user proposals with milestones, parallel work streams, and Gantt charts."""
 
-    TIMELINE_SYSTEM_PROMPT = """You are a senior project planning expert with 20+ years of experience
-managing complex software and engineering projects.
+    TIMELINE_SYSTEM_PROMPT = """You are a senior project planning expert. Output ONLY the following four sections in plain text. No markdown headings (##, ###). No prose outside the sections.
 
-You generate STRICT, MACHINE-PARSEABLE project plans for automated systems.
+SECTION 1 - PHASES:
+Phase Name: <name>
+- Duration: <duration>
+- Milestones: <milestones>
+- Entry Criteria: <criteria>
+- Exit Criteria: <criteria>
 
----
+(repeat for each phase)
 
-# CRITICAL OUTPUT RULES (NON-NEGOTIABLE)
+SECTION 2 - PARALLEL STREAMS:
+- Stream: <name>: <description>
 
-You MUST follow these rules exactly:
+(list 2-4 streams, e.g. Backend, Frontend, DevOps, QA)
 
-1. Do NOT use Markdown headings (###, ##, etc.)
-2. Do NOT add explanations outside the required sections
-3. Do NOT wrap sections in prose
-4. Do NOT include any text after the Mermaid diagram
-5. The output MUST end with a Mermaid gantt block
-6. The Mermaid block MUST be valid and syntactically correct
+SECTION 3 - DEPENDENCIES:
+- <dependency description>
 
-If you break any rule → output is considered INVALID.
+SECTION 4 - GANTT CHART:
+Output ONLY a valid Mermaid gantt block. No text before or after it. No markdown fences.
 
----
-
-# REQUIRED OUTPUT STRUCTURE (ORDER IS FIXED)
-
-You MUST output in EXACTLY this order:
-
-1. Project Phases & Milestones
-2. Parallel Work Streams
-3. Dependencies & Critical Path
-4. Mermaid Gantt Chart (LAST SECTION)
-
----
-
-# 1️ PROJECT PHASES & MILESTONES
-
-Output as plain bullet points only:
-
-Phase Name:
-- Duration:
-- Milestones:
-- Entry Criteria:
-- Exit Criteria:
-
----
-
-# 2️ PARALLEL WORK STREAMS
-
-List 2–4 parallel streams:
-- Stream Name: description
-
-Must include real engineering separation (frontend/backend/devops/qa/etc.)
-
----
-
-# 3️ DEPENDENCIES & CRITICAL PATH
-
-- List dependencies in bullet form
-- Identify critical path explicitly
-- Mention bottlenecks clearly
-
----
-
-# 4️MERMAID GANTT CHART (MANDATORY + FINAL OUTPUT)
-
-You MUST output ONLY this block and NOTHING AFTER IT:
-
-```mermaid
 gantt
-    title Project Timeline
+    title <Project Title> Timeline
     dateFormat YYYY-MM-DD
 
     section Discovery
@@ -99,8 +53,7 @@ gantt
     QA Testing :a5, after a3, 7d
 
     section Deployment
-    Release :a6, after a5, 3d
-```"""
+    Release :a6, after a5, 3d"""
     def __init__(self, session_manager: Optional[Any] = None) -> None:
         """Initialize the time agent."""
         super().__init__("time_agent", session_manager=session_manager)
@@ -136,80 +89,20 @@ gantt
         include_parallel_work: bool = True,
     ) -> str:
         """Build a structured timeline prompt from proposal context."""
-
         tech_context = ""
         if tech_stack:
             tech_context = f"\nTechnology Stack: {', '.join(tech_stack)}"
 
-        timeline_instructions = "Include a Gantt chart diagram." if include_gantt else ""
-        parallel_instructions = (
-            "Explicitly identify parallel work streams that can run concurrently."
-            if include_parallel_work
-            else ""
-        )
+        return f"""{self.TIMELINE_SYSTEM_PROMPT}
 
-        template = PromptTemplate(
-            input_variables=[
-                "project_title",
-                "timeline_weeks",
-                "team_size",
-                "tech_context",
-                "timeline_instructions",
-                "parallel_instructions",
-                "proposal",
-            ],
-            template="""
-{system_prompt}
-
-Project: {project_title}
+Project: {project_title or "Project"}
 Target Duration: {timeline_weeks} weeks
 Team Size: {team_size} members{tech_context}
-
-Instructions:
-{timeline_instructions}
-{parallel_instructions}
 
 Project Proposal:
 {proposal}
 
-Deliver:
-## 1. Project Phases & Milestones
-[List phases with milestone markers and estimated durations]
-
-## 2. Parallel Work Streams
-[Identify tasks that can run concurrently]
-
-## 3. Dependencies & Critical Path
-[List key dependencies and identify the critical path]
-
-## 4. Gantt Chart
-```mermaid
-gantt
-    title {project_title} - Project Timeline
-    dateFormat  YYYY-MM-DD
-    section Phase Name
-    Task Name :a1, 2026-05-10, 10d
-```
-""".format(
-                system_prompt=self.TIMELINE_SYSTEM_PROMPT,
-                project_title=project_title or "Project",
-                timeline_weeks=timeline_weeks,
-                team_size=team_size,
-                tech_context=tech_context,
-                timeline_instructions=timeline_instructions,
-                parallel_instructions=parallel_instructions,
-                proposal=proposal,
-            ),
-        )
-        return template.format(
-            project_title=project_title or "Project",
-            timeline_weeks=timeline_weeks,
-            team_size=team_size,
-            tech_context=tech_context,
-            timeline_instructions=timeline_instructions,
-            parallel_instructions=parallel_instructions,
-            proposal=proposal,
-        )
+Now output the four sections exactly as shown above for this project. End with the gantt block. No markdown fences around the gantt block. No ## headings."""
 
     def _is_retryable_error(self, exc: Exception) -> bool:
         """Check if an exception is retryable (timeout, server errors, etc.)."""
@@ -375,11 +268,19 @@ gantt
     def _extract_parallel_streams(self, timetable: str) -> list[str]:
         """Extract parallel work streams from the timetable text."""
         streams = []
-        current_section = None
+        in_streams_section = False
         for line in timetable.split("\n"):
-            line_lower = line.strip().lower()
-            if "section" in line_lower and "gantt" not in line_lower:
-                current_section = line.strip()
-            elif current_section and line.strip() and not line.startswith(" ") and not line.startswith("\t"):
-                streams.append(f"{current_section}: {line.strip()}")
+            line_stripped = line.strip()
+            line_lower = line_stripped.lower()
+            # Detect section 2 header (handles both "SECTION 2" and "## 2." formats)
+            if "parallel" in line_lower and ("stream" in line_lower or "section 2" in line_lower):
+                in_streams_section = True
+                continue
+            # Stop at next section
+            if in_streams_section and line_lower.startswith("section") and "parallel" not in line_lower:
+                break
+            if in_streams_section and ("section 3" in line_lower or "dependenc" in line_lower or "gantt" in line_lower):
+                break
+            if in_streams_section and line_stripped.startswith("-") and len(line_stripped) > 5:
+                streams.append(line_stripped.lstrip("- ").strip())
         return streams
