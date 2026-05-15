@@ -1,5 +1,6 @@
 """Validator Agent for FlowForge - validates Mermaid diagrams with refined checks."""
 
+import re
 from typing import Any, Optional
 
 from src.agents.base_validator_agent import BaseValidatorAgent
@@ -18,7 +19,7 @@ class ValidatorAgent(BaseValidatorAgent):
 
     def _get_model(self) -> str:
         """Return the HuggingFace model identifier."""
-        return "Qwen/Qwen2.5-VL-7B-Instruct"
+        return "Qwen/Qwen2.5-Coder-32B-Instruct"
 
     def execute(self, state: dict[str, Any]) -> dict[str, Any]:
         """
@@ -152,6 +153,16 @@ class ValidatorAgent(BaseValidatorAgent):
                         "warnings": result.get("warnings", []),
                         "suggestions": result.get("suggestions", []),
                     })
+                elif result.get("suggestions"):
+                    # Diagram is valid but has quality suggestions — collect for improvement
+                    invalid_diagrams.append({
+                        "index": idx,
+                        "diagram_type": diagram_type,
+                        "feedback": "Quality improvement suggested.",
+                        "critical_issues": [],
+                        "warnings": result.get("warnings", []),
+                        "suggestions": result.get("suggestions", []),
+                    })
 
             valid_count = sum(
                 1 for r in validation_results if r["is_valid"]
@@ -163,7 +174,13 @@ class ValidatorAgent(BaseValidatorAgent):
                 len(validation_results),
             )
 
-            if all_valid:
+            retry_count = state.get("validation_retry_count", 0)
+
+            # Diagrams with quality suggestions get one improvement pass (retry_count == 0 only)
+            has_quality_suggestions = bool(invalid_diagrams) and all_valid
+            should_improve = has_quality_suggestions and retry_count == 0
+
+            if all_valid and not should_improve:
                 result_state = self._update_state(
                     state,
                     {
@@ -174,29 +191,29 @@ class ValidatorAgent(BaseValidatorAgent):
                         "error": None,
                         "route_to": "end",
                         "current_agent": "validator_agent",
+                        "validation_retry_count": retry_count,
                     },
                 )
-            else:
-                # Build improvement feedback for the image generator
+            elif not all_valid or should_improve:
                 improvement_prompt = self._build_improvement_prompt(
                     invalid_diagrams, previous_prompts
                 )
-
                 result_state = self._update_state(
                     state,
                     {
                         "validation_results": validation_results,
-                        "overall_validation": False,
+                        "overall_validation": all_valid,
                         "valid_count": valid_count,
                         "total_count": len(validation_results),
                         "error": (
-                            f"{len(invalid_diagrams)}/{len(validation_results)} "
-                            f"diagrams failed validation"
+                            None if all_valid else
+                            f"{len([d for d in invalid_diagrams if not next((r for r in validation_results if r.get('diagram_type') == d['diagram_type']), {}).get('is_valid', True)])}/{len(validation_results)} diagrams failed validation"
                         ),
                         "improvement_prompt": improvement_prompt,
                         "failed_diagrams": invalid_diagrams,
                         "route_to": "image_agent",
                         "current_agent": "validator_agent",
+                        "validation_retry_count": retry_count + 1,
                     },
                 )
 
@@ -238,62 +255,38 @@ class ValidatorAgent(BaseValidatorAgent):
         invalid_diagrams: list[dict],
         previous_prompts: list[str],
     ) -> str:
-        """Build a prompt telling the image generator what to fix.
+        """Build improvement feedback for the image generator.
 
-        Parameters
-        ----------
-        invalid_diagrams : list[dict]
-            List of failed diagram info dicts with feedback and issues.
-        previous_prompts : list[str]
-            Previous generation prompts to avoid repeating mistakes.
-
-        Returns
-        -------
-        str
-            Improvement prompt for the image generator.
+        Separates syntax failures (must fix) from quality suggestions (nice to fix).
+        Keeps feedback concrete to prevent LLM hallucination.
         """
-        prompt_parts = [
-            "IMPORTANT: The previous diagram generation had validation failures. "
-            "Please regenerate the diagrams with strict adherence to the following fixes:"
-        ]
+        syntax_failures = [d for d in invalid_diagrams if d.get("critical_issues")]
+        quality_suggestions = [d for d in invalid_diagrams if not d.get("critical_issues") and d.get("suggestions")]
 
-        for idx, diag in enumerate(invalid_diagrams):
-            diag_type = diag.get("diagram_type", "unknown")
-            prompt_parts.append(f"\n--- Diagram #{idx + 1} ({diag_type}) ---")
+        prompt_parts = []
 
-            feedback = diag.get("feedback", "")
-            if feedback:
-                prompt_parts.append(f"Issue: {feedback}")
-
-            critical = diag.get("critical_issues", [])
-            if critical:
-                prompt_parts.append(
-                    f"Critical issues: {'; '.join(critical)}"
-                )
-
-            warnings = diag.get("warnings", [])
-            if warnings:
-                prompt_parts.append(
-                    f"Warnings: {'; '.join(warnings)}"
-                )
-
-            suggestions = diag.get("suggestions", [])
-            if suggestions:
-                prompt_parts.append(
-                    f"Suggestions: {'; '.join(suggestions)}"
-                )
-
-        if previous_prompts:
+        if syntax_failures:
             prompt_parts.append(
-                "\nNote: Previous prompts that produced invalid results: "
+                "SYNTAX FIXES REQUIRED — regenerate these diagrams with the exact fixes below:"
             )
-            for p in previous_prompts[-3:]:
-                prompt_parts.append(f"  - {p[:200]}")
+            for diag in syntax_failures:
+                diag_type = diag.get("diagram_type", "unknown")
+                prompt_parts.append(f"\n[{diag_type}] Fix: {diag.get('feedback', '')}")
+                for issue in diag.get("critical_issues", []):
+                    prompt_parts.append(f"  - {issue}")
+
+        if quality_suggestions:
+            prompt_parts.append(
+                "\nQUALITY IMPROVEMENTS — apply these to make diagrams more readable:"
+            )
+            for diag in quality_suggestions:
+                diag_type = diag.get("diagram_type", "unknown")
+                for sug in diag.get("suggestions", []):
+                    prompt_parts.append(f"  [{diag_type}] {sug}")
 
         prompt_parts.append(
-            "\nMake sure all generated Mermaid diagrams are syntactically valid, "
-            "start with the correct diagram type keyword, have balanced brackets, "
-            "and follow Mermaid.js best practices."
+            "\nKeep all Mermaid syntax valid: correct start keyword, balanced brackets, "
+            "no parentheses inside [] labels, no prose after the last diagram line."
         )
 
         return "\n".join(prompt_parts)
@@ -340,77 +333,78 @@ class ValidatorAgent(BaseValidatorAgent):
                 "Basic Mermaid validation failed: %s",
                 basic_result["feedback"],
             )
-
             return {
                 **basic_result,
                 "is_valid": False,
                 "feedback": basic_result["feedback"],
                 "suggestions": [],
+                "critical_issues": [],
+                "warnings": [],
             }
 
-        validation_prompt = (
-            self.VALIDATOR_SYSTEM_PROMPT
-            + "\n\n"
-            + "Diagram Type: "
-            + diagram_type
-            + "\n\n"
-            + "Mermaid Diagram to Validate:\n```mermaid\n"
-            + diagram
-            + "\n```\n\n"
-            + "Perform thorough validation and return results in EXACT format:\n\n"
-            + "VALID: true/false\n"
-            + "CRITICAL_ISSUES: [list or \"None\"]\n"
-            + "WARNINGS: [list or \"None\"]\n"
-            + "SUGGESTIONS: [list or \"None\"]\n"
-            + "FEEDBACK: [detailed explanation]\n"
-        )
-
-        self.logger.info(
-            "Validation prompt length=%d",
-            len(validation_prompt),
+        # Basic validation passed — diagram is syntactically valid.
+        # Now ask LLM for visual/structural quality feedback only (never overrides is_valid).
+        quality_prompt = (
+            "You are a diagram quality reviewer. The Mermaid diagram below is syntactically valid.\n"
+            "Your job is ONLY to identify visual or structural quality issues that would make the diagram\n"
+            "hard to read or understand — NOT syntax errors.\n\n"
+            "Look for:\n"
+            "- Too many nodes causing clutter (>20 nodes)\n"
+            "- Deeply nested chains that are hard to follow (>8 levels deep)\n"
+            "- Nodes with too many edges making the diagram unreadable\n"
+            "- Missing logical grouping (subgraphs would help)\n"
+            "- Diagram is too generic (just a linear chain with no branching)\n\n"
+            "Do NOT flag:\n"
+            "- Syntax issues (already validated)\n"
+            "- Missing features or content\n"
+            "- Style preferences\n\n"
+            f"Diagram type context: {diagram_type}\n\n"
+            f"Mermaid Diagram:\n```\n{diagram}\n```\n\n"
+            "Return ONLY this format:\n"
+            "HAS_ISSUES: true/false\n"
+            "SUGGESTIONS: [list of specific improvements or None]\n"
         )
 
         try:
             llm_response = self._chat_completion_with_retry(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": validation_prompt,
-                    }
-                ],
-                max_tokens=300,
+                messages=[{"role": "user", "content": quality_prompt}],
+                max_tokens=200,
             )
-
             response_text = (
                 llm_response.choices[0].message.content.strip()
                 if hasattr(llm_response, "choices")
                 else str(llm_response).strip()
             )
+            self.logger.info("Quality review response:\n%s", response_text)
 
-            self.logger.info(
-                "Raw validator response:\n%s",
-                response_text,
-            )
+            suggestions = []
+            has_issues = False
 
-            parsed = self._parse_llm_validation(response_text)
+            has_match = re.search(r"HAS_ISSUES:\s*(true|false)", response_text, re.I)
+            if has_match:
+                has_issues = has_match.group(1).lower() == "true"
 
-            self.logger.info(
-                "Parsed validation result=%s",
-                parsed,
-            )
-
-            return parsed
-
-        except Exception as exc:
-            self.logger.error(
-                "Validation LLM call failed: %s",
-                exc,
-                exc_info=True,
-            )
+            sug_match = re.search(r"SUGGESTIONS:\s*(.+)", response_text, re.I | re.S)
+            if sug_match and sug_match.group(1).strip().lower() not in ("none", "[]"):
+                suggestions = [
+                    s.strip()
+                    for s in re.split(r"[\n,]", sug_match.group(1))
+                    if s.strip() and s.strip() not in ("-", "[]", "None")
+                ]
 
             return {
-                "is_valid": False,
-                "feedback": f"Validation LLM call failed: {exc}",
+                "is_valid": True,  # always True — basic validation already passed
+                "feedback": "Basic validation passed.",
+                "critical_issues": [],
+                "warnings": suggestions if has_issues else [],
+                "suggestions": suggestions,
+            }
+
+        except Exception as exc:
+            self.logger.warning("Quality review LLM call failed: %s", exc)
+            return {
+                "is_valid": True,
+                "feedback": "Basic validation passed.",
                 "critical_issues": [],
                 "warnings": [],
                 "suggestions": [],
