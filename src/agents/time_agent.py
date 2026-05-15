@@ -13,7 +13,7 @@ from src.config import Config
 class TimeAgent(BaseAgent):
     """Generate project timelines from user proposals with milestones, parallel work streams, and Gantt charts."""
 
-    TIMELINE_SYSTEM_PROMPT = """You are a senior project planning expert. Output ONLY the following four sections in plain text. No markdown headings (##, ###). No prose outside the sections.
+    TIMELINE_SYSTEM_PROMPT = """You are a senior project planning expert. Also if the input does not have team members/team size speculate and evaluate based on the input. Output ONLY the following four sections in plain text. No markdown headings (##, ###). No prose outside the sections.
 
 SECTION 1 - PHASES:
 Phase Name: <name>
