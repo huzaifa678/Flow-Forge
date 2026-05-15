@@ -54,9 +54,8 @@ For each task, consider:
             raise ValueError("HF_TOKEN must be set.")
 
         self.llm = InferenceClient(
-            model="deepseek-ai/DeepSeek-R1",
+            model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
             token=Config.HF_TOKEN,
-            provider=LLMConfig.PLAN_PROVIDER,
         )
 
     def _build_plan_prompt(
