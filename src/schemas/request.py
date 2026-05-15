@@ -58,7 +58,7 @@ class ProposalRequest(BaseModel):
         default=12, ge=1, le=104, description="Estimated timeline in weeks"
     )
     team_size: Optional[int] = Field(
-        default=5, ge=1, le=50, description="Estimated team size"
+        default=5, ge=1, le=500, description="Estimated team size"
     )
     tech_stack: Optional[List[str]] = Field(
         default_factory=list, description="Preferred technology stack"
