@@ -27,64 +27,142 @@ class ImageGeneratorAgent(BaseAgent):
 
     DIAGRAM_TEMPLATES = {
         DiagramType.WORKFLOW: {
-            "system_role": (
-                "You are an expert workflow diagram designer."
-            ),
+            "system_role": "You are an expert workflow diagram designer. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Use flowchart syntax\n"
-                "- Include decision nodes\n"
-                "- Show process flow clearly\n"
-                "- Include start and end nodes"
+                "- Use graph TD syntax\n"
+                "- Show the actual project workflow with decision points\n"
+                "- Use {} for decisions, [] for processes\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase (no spaces)\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    Start[Project Start] --> Req[Requirements Analysis]\n"
+                "    Req --> Design[System Design]\n"
+                "    Design --> Dev{Development Ready?}\n"
+                "    Dev -->|Yes| Backend[Backend Dev]\n"
+                "    Dev -->|No| Design\n"
+                "    Backend --> Frontend[Frontend Dev]\n"
+                "    Frontend --> QA[QA Testing]\n"
+                "    QA --> Deploy[Deployment]\n"
+                "    Deploy --> End[Project Complete]"
             ),
         },
         DiagramType.CI_CD: {
-            "system_role": (
-                "You are an expert CI/CD architect."
-            ),
+            "system_role": "You are an expert CI/CD architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Show build/test/deploy stages\n"
-                "- Include rollback paths\n"
-                "- Show branching strategy"
+                "- Use graph TD syntax\n"
+                "- Show actual CI/CD pipeline stages: code commit, build, test, deploy\n"
+                "- Include branch strategy and rollback paths\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    Commit[Code Commit] --> Build[Docker Build]\n"
+                "    Build --> UnitTest[Unit Tests]\n"
+                "    UnitTest --> IntTest[Integration Tests]\n"
+                "    IntTest --> Pass{Tests Pass?}\n"
+                "    Pass -->|Yes| Staging[Deploy to Staging]\n"
+                "    Pass -->|No| Rollback[Rollback]\n"
+                "    Staging --> Approve{Manual Approval}\n"
+                "    Approve -->|Yes| Prod[Deploy to Production]\n"
+                "    Approve -->|No| Rollback"
             ),
         },
         DiagramType.SYSTEM_DESIGN: {
-            "system_role": (
-                "You are an expert system architect."
-            ),
+            "system_role": "You are an expert system architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Include services/databases/caches\n"
-                "- Show data flow directions\n"
-                "- Include API gateways"
+                "- Use graph TD syntax\n"
+                "- Show actual system components: API gateway, services, databases, caches, queues\n"
+                "- Show data flow between components with labeled arrows\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    Client[Web Client] --> Gateway[API Gateway]\n"
+                "    Gateway --> AuthSvc[Auth Service]\n"
+                "    Gateway --> VideoSvc[Video Ingestion Service]\n"
+                "    VideoSvc --> Kafka[Kafka Queue]\n"
+                "    Kafka --> AIPipeline[AI Inference Pipeline]\n"
+                "    AIPipeline --> Redis[Redis Cache]\n"
+                "    AIPipeline --> PostgreSQL[PostgreSQL DB]\n"
+                "    Redis --> Dashboard[Dashboard API]\n"
+                "    Dashboard --> Client"
             ),
         },
         DiagramType.FLOWCHART: {
-            "system_role": (
-                "You are an expert business process analyst."
-            ),
+            "system_role": "You are an expert business process analyst. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Use proper flowchart syntax\n"
-                "- Include conditional branches\n"
-                "- Use readable structure"
+                "- Use graph TD syntax\n"
+                "- Show the project phases as a process flow with decision branches\n"
+                "- Use {} for decisions, [] for steps\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    Discovery[Discovery Phase] --> DesignReady{Design Ready?}\n"
+                "    DesignReady -->|Yes| Design[Design Phase]\n"
+                "    DesignReady -->|No| Discovery\n"
+                "    Design --> DevReady{Dev Ready?}\n"
+                "    DevReady -->|Yes| Development[Development Phase]\n"
+                "    DevReady -->|No| Design\n"
+                "    Development --> Testing[Testing Phase]\n"
+                "    Testing --> PassQA{QA Passed?}\n"
+                "    PassQA -->|Yes| Deployment[Deployment]\n"
+                "    PassQA -->|No| Development"
             ),
         },
         DiagramType.ARCHITECTURE: {
-            "system_role": (
-                "You are an enterprise architect."
-            ),
+            "system_role": "You are an enterprise architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Show architecture layers\n"
-                "- Include network boundaries\n"
-                "- Show infrastructure components"
+                "- Use graph TD syntax with subgraph to show architecture layers\n"
+                "- Show infrastructure layers: Client, API, Services, Data, Infrastructure\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    subgraph ClientLayer[Client Layer]\n"
+                "        Browser[Web Browser]\n"
+                "        Mobile[Mobile App]\n"
+                "    end\n"
+                "    subgraph APILayer[API Layer]\n"
+                "        Gateway[API Gateway]\n"
+                "        Auth[Auth Service]\n"
+                "    end\n"
+                "    subgraph DataLayer[Data Layer]\n"
+                "        DB[PostgreSQL]\n"
+                "        Cache[Redis]\n"
+                "        Queue[Kafka]\n"
+                "    end\n"
+                "    Browser --> Gateway\n"
+                "    Mobile --> Gateway\n"
+                "    Gateway --> Auth\n"
+                "    Auth --> DB\n"
+                "    Gateway --> Cache\n"
+                "    Gateway --> Queue"
             ),
         },
         DiagramType.GANTT: {
-            "system_role": (
-                "You are an expert project manager."
-            ),
+            "system_role": "You are an expert project manager. REMEMBER generate the code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
             "requirements": (
-                "- Use gantt syntax only\n"
-                "- Include milestones\n"
-                "- Show dependencies"
+                "- You MUST start with 'gantt' on the first line — no other syntax\n"
+                "- You MUST include 'title' and 'dateFormat YYYY-MM-DD'\n"
+                "- Use 'section' to group tasks by phase\n"
+                "- Each task: TaskName :id, startDate_or_after_dep, duration\n"
+                "- Example:\n"
+                "gantt\n"
+                "    title Project Timeline\n"
+                "    dateFormat YYYY-MM-DD\n"
+                "    section Discovery\n"
+                "    Requirements :a1, 2026-05-14, 5d\n"
+                "    section Design\n"
+                "    Architecture :a2, after a1, 7d\n"
+                "    section Development\n"
+                "    Backend :a3, after a2, 14d\n"
+                "    Frontend :a4, after a2, 14d\n"
+                "    section Testing\n"
+                "    QA Testing :a5, after a3, 7d\n"
+                "    section Deployment\n"
+                "    Release :milestone, after a5, 0d"
             ),
         },
     }
@@ -108,13 +186,13 @@ class ImageGeneratorAgent(BaseAgent):
             raise ValueError("HF_TOKEN must be set.")
 
         self.llm = InferenceClient(
-            model="deepseek-ai/DeepSeek-R1",
+            model="Qwen/Qwen2.5-Coder-32B-Instruct",
             token=Config.HF_TOKEN,
         )
 
         self.logger.info(
             "Image generator LLM initialized successfully with model=%s",
-            "deepseek-ai/DeepSeek-R1",
+            "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         )
 
     def _extract_text(self, response: Any) -> str:
@@ -178,8 +256,11 @@ class ImageGeneratorAgent(BaseAgent):
     template="""
 {system_role}
 
-Rules:
+STRICT RULES — follow exactly:
 {rules}
+
+Use the plan below to fill in real project-specific content (services, phases, tasks).
+Do NOT copy the example verbatim — adapt it to the actual project.
 
 Plan:
 {plan}
@@ -187,9 +268,7 @@ Plan:
 Timeline Reference:
 {timeline}
 
-Generate ONLY valid Mermaid syntax.
-Do NOT include markdown fences.
-Do NOT explain anything.
+Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text after the last line.
 """,
 )
 
@@ -227,11 +306,16 @@ Do NOT explain anything.
         # Extract from ```mermaid ... ``` fences if present
         if "```" in diagram:
             self.logger.warning("Markdown fences detected. Cleaning response.")
-            diagram = (
-                diagram.replace("```mermaid", "")
-                .replace("```", "")
-                .strip()
-            )
+            # Try to extract just the content inside the first ```mermaid...``` block
+            mermaid_match = re.search(r"```mermaid\s*(.*?)\s*```", diagram, re.DOTALL | re.IGNORECASE)
+            if mermaid_match:
+                diagram = mermaid_match.group(1).strip()
+            else:
+                diagram = (
+                    diagram.replace("```mermaid", "")
+                    .replace("```", "")
+                    .strip()
+                )
 
         # If there's preamble before the diagram keyword, strip it
         valid_starts = ["gantt", "flowchart", "graph", "sequenceDiagram",
@@ -242,10 +326,91 @@ Do NOT explain anything.
                 diagram = "\n".join(lines[i:]).strip()
                 break
 
+        # Strip trailing prose that LLMs append after the diagram
+        diagram = self._strip_trailing_prose(diagram)
+
+        # Sanitize unquoted multi-word node IDs (e.g. "Discovery --> Requirement Analysis" → "Discovery --> RequirementAnalysis")
+        diagram = self._sanitize_node_ids(diagram)
+
         self.logger.info("Parsed diagram length=%d", len(diagram))
         self.logger.info("Diagram preview:\n%s", diagram[:1000])
 
         return diagram
+
+    def _sanitize_node_ids(self, diagram: str) -> str:
+        """Fix common LLM-generated Mermaid syntax errors.
+        
+        - Removes parentheses inside [] node labels (breaks Mermaid parser)
+        - Collapses unquoted multi-word node IDs after arrows
+        """
+        lines = diagram.split("\n")
+        sanitized = []
+        
+        for line in lines:
+            # Remove parentheses inside [] node labels: A[Label (detail)] → A[Label detail]
+            line = re.sub(r'\[([^\]]*)\(([^\)]*)\)([^\]]*)\]', r'[\1\2\3]', line)
+            
+            # Skip further processing if line uses brackets/braces (labels already safe)
+            if "[" in line or "{" in line:
+                sanitized.append(line)
+                continue
+            
+            # Skip lines with () node labels (stadium shape) — those are intentional
+            if "(" in line:
+                sanitized.append(line)
+                continue
+            
+            # Fix unquoted multi-word node IDs after arrows
+            line = re.sub(
+                r'(-->|->)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',
+                lambda m: f"{m.group(1)} {m.group(2).replace(' ', '')}",
+                line
+            )
+            line = re.sub(
+                r'^\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(-->|->)',
+                lambda m: f"{m.group(1).replace(' ', '')} {m.group(2)}",
+                line
+            )
+            
+            sanitized.append(line)
+        
+        return "\n".join(sanitized)
+
+    def _strip_trailing_prose(self, diagram: str) -> str:
+        """Remove explanatory prose appended after the Mermaid diagram."""
+        lines = diagram.split("\n")
+        cleaned = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and any(
+                stripped.startswith(prefix)
+                for prefix in ["This ", "The ", "Note:", "Here ", "Above ", "Below "]
+            ):
+                self.logger.info("Stripping trailing prose: %s", stripped[:60])
+                break
+            cleaned.append(line)
+        return "\n".join(cleaned).strip()
+
+    def _build_fallback_gantt(self, timeline: Optional[str] = None) -> str:
+        """Build a minimal valid gantt diagram when the LLM returns wrong syntax."""
+        import datetime
+        start = datetime.date.today().strftime("%Y-%m-%d")
+        return (
+            f"gantt\n"
+            f"    title Project Timeline\n"
+            f"    dateFormat YYYY-MM-DD\n"
+            f"    section Discovery\n"
+            f"    Requirements Analysis :a1, {start}, 5d\n"
+            f"    section Design\n"
+            f"    System Design :a2, after a1, 7d\n"
+            f"    section Development\n"
+            f"    Backend Development :a3, after a2, 14d\n"
+            f"    Frontend Development :a4, after a2, 14d\n"
+            f"    section Testing\n"
+            f"    QA Testing :a5, after a3, 7d\n"
+            f"    section Deployment\n"
+            f"    Release :milestone, after a5, 0d"
+        )
 
     def _validate_diagram(self, diagram: str) -> bool:
         """Validate Mermaid syntax structure."""
@@ -490,11 +655,13 @@ Do NOT explain anything.
                 max_tokens=700,
             )
 
+            msg = response.choices[0].message if hasattr(response, "choices") else None
             raw_content = (
-                response.choices[0].message.content
-                if hasattr(response, "choices")
-                else str(response)
-            )
+                (msg and msg.content and msg.content.strip())
+                or (getattr(msg, "reasoning_content", None) or "").strip()
+                or (getattr(msg, "reasoning", None) or "").strip()
+                or ""
+            ) if msg else ""
 
             self.logger.info(
                 "Raw LLM content length=%d",
@@ -502,6 +669,13 @@ Do NOT explain anything.
             )
 
             diagram = self._parse_diagram(raw_content)
+
+            # If gantt was requested but LLM returned wrong type, build a minimal valid gantt
+            if diagram_type == DiagramType.GANTT and not diagram.lower().strip().startswith("gantt"):
+                self.logger.warning(
+                    "Gantt diagram requested but LLM returned wrong type. Using fallback gantt."
+                )
+                diagram = self._build_fallback_gantt(timeline)
 
             is_valid = self._validate_diagram(diagram)
 
