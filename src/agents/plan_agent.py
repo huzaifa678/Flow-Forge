@@ -284,7 +284,7 @@ Be thorough and realistic in all estimates.""".format(
                         "content": formatted_prompt,
                     }
                 ],
-                max_tokens=1700,
+                max_tokens=4000,
                 formatted_prompt=formatted_prompt,
             )
 
@@ -295,8 +295,8 @@ Be thorough and realistic in all estimates.""".format(
                 plan = message.content.strip()
             elif hasattr(message, "reasoning_content") and message.reasoning_content:
                 plan = message.reasoning_content.strip()
-            else:
-                plan = str(response).strip()
+            elif hasattr(message, "reasoning") and message.reasoning:
+                plan = message.reasoning.strip()
 
             if not plan or plan == "None":
                 raise ValueError("LLM returned an empty plan.")

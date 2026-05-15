@@ -202,10 +202,12 @@ Now output the four sections exactly as shown above for this project. End with t
                 ],
                 max_tokens=600,
             )
+            msg = response.choices[0].message
             timetable = (
-                response.choices[0].message.content.strip()
-                if hasattr(response, "choices")
-                else str(response).strip()
+                (msg.content and msg.content.strip())
+                or (getattr(msg, "reasoning_content", None) or "").strip()
+                or (getattr(msg, "reasoning", None) or "").strip()
+                or ""
             )
 
             # Extract milestones from response

@@ -23,47 +23,39 @@ class BaseValidatorAgent(BaseAgent):
     """
 
     VALIDATOR_SYSTEM_PROMPT = """
-You are a strict Mermaid.js validator used in a production diagram generation pipeline.
+You are a Mermaid.js syntax validator. Validate only real rendering errors.
 
-Your task is to validate Mermaid diagrams exactly as Mermaid.js would.
+VALID Mermaid patterns you must NOT flag as errors:
+- `graph TD;` or `graph LR;` — trailing semicolons on the root declaration are valid
+- A node having multiple outbound edges (e.g. `A --> B`, `A --> C`) — this is valid
+- A node having multiple inbound edges — this is valid
+- Gantt sections with tasks — sections do not need explicit closing
+- `graph TD` and `flowchart TD` are both valid root declarations
+- Node IDs with numbers like `a1`, `b1`, `cc1` are valid
+- Using both `[]`, `{}`, and `()` node shapes in the same `graph TD` is valid — this is NOT mixed types
+- Standalone node declarations like `A[Label]` without edges are valid
+- Duplicate edges between the same nodes are valid (unusual but not a syntax error)
 
-You MUST detect:
-1. Mermaid syntax errors
-2. Invalid node/link syntax
-3. Invalid diagram root declarations
-4. Broken graph structure
-5. Unsupported Mermaid constructs
-6. Renderer-breaking formatting issues
-7. Invalid bracket/quote usage
-8. Invalid subgraph usage
-9. Invalid edge syntax
-10. Ambiguous or malformed relationships
-11. Mixed diagram types
-12. Markdown contamination outside Mermaid syntax
+Only mark INVALID for these real errors:
+1. Diagram does not start with a valid keyword (graph, flowchart, gantt, sequenceDiagram, etc.)
+2. Mismatched brackets `[]`, `()`, `{}` that would break parsing
+3. Incomplete arrow syntax (e.g. `A -` with nothing after)
+4. Text or prose appearing outside node/edge definitions
+5. Unclosed subgraph blocks (subgraph without end)
+6. Parentheses inside square bracket labels: `A[Label (detail)]` — this breaks the parser
 
-You are NOT a general code reviewer.
-You are a STRICT Mermaid parser and rendering validator.
+Do NOT mark INVALID based on:
+- Semicolons on declarations
+- Number of edges per node
+- "Mixed diagram types" — using different node shapes in graph TD is NOT mixed types
+- Indentation style
 
-Validation Rules:
-- Reject diagrams that may fail Mermaid rendering.
-- Reject diagrams with malformed arrows or node syntax.
-- Reject diagrams with nested incompatible structures.
-- Reject diagrams with invalid indentation patterns.
-- Reject diagrams containing explanatory prose inside Mermaid code.
-- Reject diagrams using unsupported syntax variants.
-- Reject diagrams mixing flowchart and sequence syntax.
-- Reject diagrams with unclosed subgraphs.
-- Reject diagrams with duplicate/conflicting declarations.
-- Reject diagrams with unsafe/unescaped special characters.
-
-Important:
-- Be conservative.
-- If uncertain whether Mermaid would render successfully, mark INVALID.
-- Do NOT assume Mermaid autocorrects syntax.
-- Do NOT give praise or conversational feedback.
-- Focus only on renderer validity and structural quality.
-
-Return ONLY the requested format.
+Return ONLY this exact format:
+VALID: true/false
+CRITICAL_ISSUES: [list or None]
+WARNINGS: [list or None]
+SUGGESTIONS: [list or None]
+FEEDBACK: [one sentence explanation]
 """
 
     def __init__(self, name: str, session_manager: Optional[Any] = None) -> None:
@@ -94,8 +86,7 @@ Return ONLY the requested format.
 
         self.llm = InferenceClient(
             model=self._get_model(),
-            token=Config.HF_TOKEN,
-            provider="hf-inference"
+            token=Config.HF_TOKEN
         )
 
         self.logger.info(
@@ -327,6 +318,14 @@ Return ONLY the requested format.
 
         self.logger.info("Basic Mermaid validation passed.")
 
+        # Check for parentheses inside square bracket labels — breaks Mermaid parser
+        if re.search(r'\[[^\]]*\([^\)]*\)[^\]]*\]', diagram_extracted):
+            self.logger.warning("Parentheses inside [] node label detected.")
+            return {
+                "is_valid": False,
+                "feedback": "Parentheses inside [] node labels break the Mermaid parser.",
+            }
+
         return {
             "is_valid": True,
             "feedback": "Validation passed.",
@@ -357,7 +356,7 @@ Return ONLY the requested format.
         if match:
             extracted = match.group(1).strip()
             self.logger.info("Extracted Mermaid code from fenced block.")
-            return extracted
+            return self._strip_trailing_prose(extracted)
 
         # Try to find ```...``` block (any language) that looks like mermaid
         generic_pattern = r"```(.*?)```"
@@ -369,7 +368,7 @@ Return ONLY the requested format.
                 for keyword in ["gantt", "flowchart", "graph", "sequence", "class", "state", "er", "pie", "journey", "gitgraph"]
             ):
                 self.logger.info("Extracted Mermaid code from generic fenced block.")
-                return block.strip()
+                return self._strip_trailing_prose(block.strip())
 
         # No fenced code block found; try to find the diagram start in raw text
         valid_starts = ["gantt", "flowchart", "graph", "sequenceDiagram",
@@ -379,10 +378,41 @@ Return ONLY the requested format.
             if any(line.strip().lower().startswith(v.lower()) for v in valid_starts):
                 extracted = "\n".join(lines[i:]).strip()
                 self.logger.info("Extracted Mermaid code by finding diagram keyword in raw text.")
-                return extracted
+                return self._strip_trailing_prose(extracted)
 
         self.logger.info("No Mermaid code fences found, using raw text.")
-        return text.strip()
+        return self._strip_trailing_prose(text.strip())
+
+    def _strip_trailing_prose(self, diagram: str) -> str:
+        """Remove explanatory prose that LLMs append after Mermaid diagrams.
+
+        Parameters
+        ----------
+        diagram : str
+            Mermaid diagram code that may have trailing prose.
+
+        Returns
+        -------
+        str
+            Cleaned diagram with trailing prose removed.
+        """
+        lines = diagram.split("\n")
+        cleaned_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Stop at lines that look like prose (start with "This", "The", "Note:", etc.)
+            if stripped and any(
+                stripped.startswith(prefix)
+                for prefix in ["This ", "The ", "Note:", "Here ", "Above ", "Below "]
+            ):
+                self.logger.info("Stripping trailing prose starting with: %s", stripped[:50])
+                break
+            
+            cleaned_lines.append(line)
+        
+        return "\n".join(cleaned_lines).strip()
 
     def _parse_llm_validation(
         self,

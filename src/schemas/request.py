@@ -1,8 +1,8 @@
 """Pydantic schemas for FlowForge request and response validation."""
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DiagramType(str, Enum):
@@ -80,6 +80,77 @@ class DiagramGenerationRequest(BaseModel):
     proposal: ProposalRequest = Field(..., description="Client proposal details")
     prompt: PromptRequest = Field(..., description="Prompt and generation instructions")
     hf_token: str = Field(..., description="HuggingFace API token")
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_aliases(cls, data: Any) -> Any:
+        """
+        Accept both the canonical nested format (proposal + prompt) and a
+        flat format where the user posts fields directly at the top level.
+
+        Flat keys recognised for proposal: Project Title * / Project Description *
+        / Requirements / Constraints / Timeline (weeks) / Team Size /
+        Technology Stack (comma-separated) / Budget Range
+
+        Flat keys recognised for prompt: User Prompt * / Diagram Types / Priority
+        """
+        if not isinstance(data, dict):
+            return data
+
+        flat_proposal_keys = {
+            "project title *": "title",
+            "project description *": "description",
+            "requirements": "requirements",
+            "constraints": "constraints",
+            "timeline (weeks)": "timeline_weeks",
+            "team size": "team_size",
+            "technology stack (comma-separated)": "tech_stack",
+            "budget range": "budget_range",
+        }
+
+        flat_prompt_keys = {
+            "user prompt *": "user_prompt",
+            "diagram types": "diagram_types",
+            "priority": "priority",
+            "optimize prompt": "optimize_prompt",
+            "include gantt": "include_gantt",
+            "include parallel work": "include_parallel_work",
+        }
+
+        lower_keys = {k.strip().lower(): k for k in data.keys()}
+
+        # Build proposal dict from flat keys if flat fields exist
+        proposal_fields: Dict[str, Any] = {}
+        for flat_key, target_key in flat_proposal_keys.items():
+            if flat_key in lower_keys:
+                original_key = lower_keys[flat_key]
+                proposal_fields[target_key] = data.pop(original_key)
+
+        # Build prompt dict from flat keys if flat fields exist
+        prompt_fields: Dict[str, Any] = {}
+        for flat_key, target_key in flat_prompt_keys.items():
+            if flat_key in lower_keys:
+                original_key = lower_keys[flat_key]
+                prompt_fields[target_key] = data.pop(original_key)
+
+        if proposal_fields or prompt_fields:
+            # Merge with any existing nested dicts (nested format takes precedence)
+            existing_proposal = data.get("proposal", {})
+            if isinstance(existing_proposal, dict):
+                existing_proposal.update(proposal_fields)
+                proposal_fields = existing_proposal
+
+            existing_prompt = data.get("prompt", {})
+            if isinstance(existing_prompt, dict):
+                existing_prompt.update(prompt_fields)
+                prompt_fields = existing_prompt
+
+            if proposal_fields:
+                data.setdefault("proposal", proposal_fields)
+            if prompt_fields:
+                data.setdefault("prompt", prompt_fields)
+
+        return data
 
     @field_validator("hf_token")
     @classmethod
