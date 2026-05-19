@@ -293,7 +293,7 @@ def run_flowforge_workflow(
     if optimize_prompt:
         try:
             optimizer = get_optimizer()
-            optimization_result = optimizer.optimize(prompt)
+            optimization_result = optimizer.optimize(prompt, audience_type=audience_type)
             working_prompt = optimization_result["optimized_prompt"]
             optimized_prompt = working_prompt
         except Exception as exc:
