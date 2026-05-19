@@ -7,7 +7,7 @@ import streamlit as st
 from components.dynamic_inputs import dynamic_list_input
 
 
-def render_project_form() -> None:
+def render_project_form(is_stakeholder: bool = False) -> None:
 
     st.subheader("📋 Project Proposal")
 
@@ -56,12 +56,13 @@ def render_project_form() -> None:
             placeholder="Enter constraint...",
         )
 
-    with st.expander("🛠️ Tech Stack"):
-        st.session_state.tech_stack = dynamic_list_input(
-            label="Technology",
-            session_key="tech_stack",
-            placeholder="e.g. FastAPI",
-        )
+    if not is_stakeholder:
+        with st.expander("🛠️ Tech Stack"):
+            st.session_state.tech_stack = dynamic_list_input(
+                label="Technology",
+                session_key="tech_stack",
+                placeholder="e.g. FastAPI",
+            )
 
     st.session_state.budget_range = st.text_input(
         "Budget Range",

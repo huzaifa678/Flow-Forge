@@ -12,8 +12,7 @@ logger = setup_logger()
 class PromptOptimizer:
     """Optimize user prompts for better agent performance using InferenceClient."""
 
-    OPTIMIZER_TEMPLATE = """You are an expert prompt engineer. Optimize the following user prompt
-for use with an AI agent pipeline that generates project documentation and diagrams.
+    ENGINEER_OPTIMIZER_TEMPLATE = """You are an expert prompt engineer optimizing for a TECHNICAL engineering audience.
 
 The pipeline has these stages:
 1. Timeline Agent - generates milestones, parallel work streams, and Gantt charts
@@ -23,16 +22,34 @@ The pipeline has these stages:
 
 Optimization rules:
 - Make requirements explicit and numbered
-- Add implicit constraints that experts would consider
+- Add implicit technical constraints that engineers would consider (scalability, latency, fault tolerance, security)
 - Structure the prompt for each pipeline stage
-- Include diagram-specific requirements
-- Ensure technical accuracy and completeness
+- Include diagram-specific technical requirements (services, APIs, databases, queues, infra)
+- Ensure technical accuracy and completeness — name actual components and technologies
 - Remove ambiguity
+- FORBIDDEN: Do NOT simplify to high-level business phases only — engineers need real technical detail
 
 User Prompt:
 {user_prompt}
 
-Optimized Prompt:"""
+Optimized Prompt (engineering focus):"""
+
+    STAKEHOLDER_OPTIMIZER_TEMPLATE = """You are an expert prompt engineer optimizing for a NON-TECHNICAL business stakeholder audience.
+
+The pipeline will generate business-friendly diagrams and a condensed spec document for executives and decision-makers.
+
+Optimization rules:
+- Rewrite any technical language into plain business outcomes and value statements
+- Focus on WHAT the system delivers, not HOW it is built internally
+- Frame requirements as business capabilities and user-facing features
+- Replace infrastructure/DevOps/ML details with timeline, cost, risk, and delivery milestones
+- Keep the project goal, scope, team structure, and delivery timeline clear
+- FORBIDDEN: Do NOT include CI/CD pipelines, system architecture specifics, tech stack names, infrastructure details, or engineering implementation details — stakeholders do not need these
+
+User Prompt:
+{user_prompt}
+
+Optimized Prompt (stakeholder focus):"""
 
     EXTRACTOR_TEMPLATE = """You are an expert at extracting structured project proposals from unstructured text.
 
@@ -106,27 +123,36 @@ Enhanced Prompt for {diagram_type}:"""
             else str(response)
         )
 
-    def optimize(self, user_prompt: str) -> dict[str, Any]:
+    def optimize(self, user_prompt: str, audience_type: str = "engineer") -> dict[str, Any]:
         """
         Optimize a user prompt for the FlowForge pipeline.
 
         Args:
             user_prompt: The raw user prompt to optimize.
+            audience_type: "engineer" or "stakeholder" — selects the optimization strategy.
 
         Returns:
             Dict containing original prompt, optimized prompt, and metadata.
         """
-        logger.info(f"Starting prompt optimization for input: {user_prompt[:50]}...")
+        logger.info(
+            "Starting prompt optimization | audience=%s | input=%s...",
+            audience_type,
+            user_prompt[:50],
+        )
         try:
-            formatted_prompt = self.OPTIMIZER_TEMPLATE.format(
-                user_prompt=user_prompt
+            template = (
+                self.STAKEHOLDER_OPTIMIZER_TEMPLATE
+                if audience_type == "stakeholder"
+                else self.ENGINEER_OPTIMIZER_TEMPLATE
             )
+            formatted_prompt = template.format(user_prompt=user_prompt)
             optimized_text = self._chat_complete(formatted_prompt, max_tokens=512)
-            logger.info("Prompt optimization completed successfully")
+            logger.info("Prompt optimization completed | audience=%s", audience_type)
             return {
                 "original_prompt": user_prompt,
                 "optimized_prompt": optimized_text.strip(),
                 "optimization_technique": "inference_client",
+                "audience_type": audience_type,
             }
         except Exception as e:
             logger.error(f"Prompt optimization failed: {str(e)}")
