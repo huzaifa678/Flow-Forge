@@ -5,14 +5,21 @@ services:
     image: postgres:16-alpine
     container_name: flowforge
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-flowforge-db}
+      POSTGRES_USER: flowforge
+      POSTGRES_PASSWORD: flowforge
+      POSTGRES_DB: flowforgedb
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - flowforge_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: .
@@ -21,11 +28,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-flowforge}:${POSTGRES_PASSWORD:-flowforge}@postgres:5432/${POSTGRES_DB:-flowforge}
+      - PYTHONPATH=/app
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - flowforge_network
+    env_file:
+      - .env.docker
+    command: sh -c "alembic -c alembic.docker.ini upgrade head && python main.py"
 
   frontend:
     build: ./frontend

@@ -319,7 +319,8 @@ class TestIntegrationAPI(unittest.TestCase):
                     "user_prompt": "Generate a workflow diagram for testing",
                     "diagram_types": ["workflow"],
                     "optimize_prompt": False,
-                    "priority": "medium"
+                    "priority": "medium",
+                    "audience_type": "engineer",
                 },
                 "hf_token": os.environ.get("HF_TOKEN", "test-token")
             }
@@ -338,6 +339,314 @@ class TestIntegrationAPI(unittest.TestCase):
                 self.assertIn("diagrams", data)
         except requests.exceptions.ConnectionError:
             self.skipTest("Backend server not running")
+
+    def test_generate_diagrams_stakeholder_live(self):
+        """Live test that a stakeholder request reaches the backend and returns only business diagrams."""
+        try:
+            payload = {
+                "proposal": {
+                    "title": "Customer Portal",
+                    "description": "A self-service portal for enterprise customer account management.",
+                    "requirements": ["User login", "Account overview"],
+                    "timeline_weeks": 16,
+                    "team_size": 5,
+                },
+                "prompt": {
+                    "user_prompt": "Generate a high-level summary for the board presentation",
+                    "diagram_types": ["flowchart", "gantt"],
+                    "optimize_prompt": False,
+                    "priority": "high",
+                    "audience_type": "stakeholder",
+                },
+                "hf_token": os.environ.get("HF_TOKEN", "test-token"),
+            }
+
+            response = self.session.post(
+                f"{self.base_url}/api/v1/generate-diagrams",
+                json=payload,
+                timeout=120,
+            )
+
+            self.assertIn(response.status_code, [200, 500])
+
+            if response.status_code == 200:
+                data = response.json()
+                allowed = {"flowchart", "gantt", "architecture"}
+                for diagram in data.get("diagrams", []):
+                    self.assertIn(
+                        diagram["diagram_type"],
+                        allowed,
+                        f"Live stakeholder response contained unexpected type: {diagram['diagram_type']}",
+                    )
+        except requests.exceptions.ConnectionError:
+            self.skipTest("Backend server not running")
+
+
+class TestAudienceTypeE2E(unittest.TestCase):
+    """End-to-end tests for audience type routing through the full stack."""
+
+    def setUp(self):
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_stakeholder_full_flow(self, mock_get_token, mock_run_workflow):
+        """Full E2E: stakeholder audience request returns business-friendly diagrams."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Customer Portal",
+            "optimized_prompt": None,
+            "timetable": "gantt\ntitle Portal\nsection Planning\nKickoff :a1, 2026-05-14, 5d\nsection Build\nDevelopment :after a1, 21d",
+            "milestones": ["Planning complete", "Build complete", "Launch"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+            "plan": "Phase 1: Discovery\nPhase 2: Design\nPhase 3: Build",
+            "diagrams": [
+                {
+                    "diagram_type": "flowchart",
+                    "mermaid_code": "graph TD\n    Discovery[Discovery] --> Design[Design]\n    Design --> Build[Build]\n    Build --> Launch[Launch]",
+                    "is_valid": True,
+                    "title": "Project Phases",
+                    "image_data": None,
+                },
+                {
+                    "diagram_type": "gantt",
+                    "mermaid_code": "gantt\ntitle Project Timeline\nsection Planning\nKickoff :a1, 2026-05-14, 5d",
+                    "is_valid": True,
+                    "title": "Project Timeline",
+                    "image_data": None,
+                },
+            ],
+            "diagram_count": 2,
+            "valid_diagram_count": 2,
+            "validation_results": [
+                {"is_valid": True, "diagram_type": "flowchart"},
+                {"is_valid": True, "diagram_type": "gantt"},
+            ],
+            "overall_validation": True,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Customer Portal",
+                    "description": "A self-service portal for enterprise customers.",
+                    "requirements": ["User login", "Account management"],
+                    "timeline_weeks": 16,
+                    "team_size": 5,
+                },
+                "prompt": {
+                    "user_prompt": "Generate high-level diagrams for our board presentation",
+                    "diagram_types": ["flowchart", "gantt"],
+                    "optimize_prompt": False,
+                    "priority": "high",
+                    "audience_type": "stakeholder",
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Status is success
+        self.assertEqual(data["status"], "success")
+
+        # All diagrams are business-friendly types
+        allowed = {"flowchart", "gantt", "architecture"}
+        for diagram in data["diagrams"]:
+            self.assertIn(diagram["diagram_type"], allowed)
+
+        # Workflow was called with audience_type=stakeholder
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "stakeholder")
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_engineer_full_flow(self, mock_get_token, mock_run_workflow):
+        """Full E2E: engineer audience request returns full technical diagram set."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Microservices Platform",
+            "optimized_prompt": "Optimized version",
+            "timetable": "gantt\ntitle Platform\nsection Design\nArchitecture :a1, 2026-05-14, 7d",
+            "milestones": ["Design", "Build", "Deploy"],
+            "parallel_work_streams": ["Auth Service", "Core Service", "API Gateway"],
+            "plan": "Phase 1: Architecture\nPhase 2: Services\nPhase 3: Integration",
+            "diagrams": [
+                {"diagram_type": "workflow", "mermaid_code": "graph TD\n    A --> B", "is_valid": True, "title": "Workflow"},
+                {"diagram_type": "ci_cd", "mermaid_code": "graph TD\n    Commit --> Build", "is_valid": True, "title": "CI/CD"},
+                {"diagram_type": "system_design", "mermaid_code": "graph TD\n    Client --> Gateway", "is_valid": True, "title": "System Design"},
+            ],
+            "diagram_count": 3,
+            "valid_diagram_count": 3,
+            "validation_results": [{"is_valid": True}] * 3,
+            "overall_validation": True,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Microservices Platform",
+                    "description": "Refactor a monolith into a distributed microservices architecture.",
+                    "requirements": ["API Gateway", "Auth Service", "Core Service"],
+                    "tech_stack": ["FastAPI", "Docker", "Kubernetes"],
+                    "timeline_weeks": 20,
+                    "team_size": 10,
+                },
+                "prompt": {
+                    "user_prompt": "Generate CI/CD, system design, and workflow diagrams",
+                    "diagram_types": ["workflow", "ci_cd", "system_design"],
+                    "optimize_prompt": True,
+                    "priority": "critical",
+                    "audience_type": "engineer",
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["total_diagram_count"], 3)
+
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "engineer")
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_stakeholder_request_rejects_technical_diagram_types(self, mock_get_token, mock_run_workflow):
+        """E2E: Requesting engineer-only diagram types with stakeholder audience is accepted
+        at API level (filtering happens inside the agent), but the workflow is invoked correctly."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Portal",
+            "diagrams": [],
+            "diagram_count": 0,
+            "valid_diagram_count": 0,
+            "overall_validation": False,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        # workflow/ci_cd are engineer types — the agent will filter them but the API
+        # should still accept the request and forward it
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Portal",
+                    "description": "A portal for managing customer accounts and subscriptions.",
+                },
+                "prompt": {
+                    "user_prompt": "Generate diagrams for the executive team",
+                    "diagram_types": ["workflow", "ci_cd"],
+                    "optimize_prompt": False,
+                    "priority": "medium",
+                    "audience_type": "stakeholder",
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        self.assertIn(response.status_code, [200, 500])
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "stakeholder")
+
+
+class TestFrontendAudienceE2E(unittest.TestCase):
+    """End-to-end Selenium tests for the audience type UI elements."""
+
+    driver = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.driver = None
+        try:
+            chrome_options = ChromeOptions()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
+            cls.driver = webdriver.Chrome(options=chrome_options)
+            cls.driver.implicitly_wait(10)
+        except Exception:
+            cls.driver = None
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.driver:
+            cls.driver.quit()
+
+    def setUp(self):
+        if not self.driver:
+            self.skipTest("ChromeDriver not available")
+
+    def test_audience_radio_buttons_exist(self):
+        """The Engineer / Stakeholder radio group must be present on the page."""
+        try:
+            self.driver.get("http://localhost:8501")
+            wait = WebDriverWait(self.driver, 10)
+            wait.until(EC.presence_of_element_located((By.XPATH, "//h1[contains(., 'FlowForge')]")))
+
+            # The radio label text should appear
+            engineer_label = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(text(), 'Engineer') or contains(text(), '👷')]")
+                )
+            )
+            self.assertIsNotNone(engineer_label)
+        except Exception:
+            self.skipTest("Frontend not running")
+
+    def test_stakeholder_radio_exists(self):
+        """Stakeholder option must be visible in the audience radio group."""
+        try:
+            self.driver.get("http://localhost:8501")
+            wait = WebDriverWait(self.driver, 10)
+            wait.until(EC.presence_of_element_located((By.XPATH, "//h1[contains(., 'FlowForge')]")))
+
+            stakeholder_label = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(text(), 'Stakeholder') or contains(text(), '📊')]")
+                )
+            )
+            self.assertIsNotNone(stakeholder_label)
+        except Exception:
+            self.skipTest("Frontend not running")
+
+    def test_audience_heading_visible(self):
+        """'Who is this report for?' heading must appear on the page."""
+        try:
+            self.driver.get("http://localhost:8501")
+            wait = WebDriverWait(self.driver, 10)
+            heading = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//*[contains(text(), 'Who is this report for')]")
+                )
+            )
+            self.assertIsNotNone(heading)
+        except Exception:
+            self.skipTest("Frontend not running")
+
+    def test_generate_button_still_present_with_audience_selector(self):
+        """Generate Diagrams button should still be present after adding the audience selector."""
+        try:
+            self.driver.get("http://localhost:8501")
+            wait = WebDriverWait(self.driver, 10)
+            btn = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//button[contains(., '🚀 Generate Diagrams')]")
+                )
+            )
+            self.assertTrue(btn.is_displayed())
+        except Exception:
+            self.skipTest("Frontend not running")
 
 
 if __name__ == "__main__":

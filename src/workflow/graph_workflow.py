@@ -16,6 +16,7 @@ Implements the agent pipeline with conditional routing:
 from typing import Any, Optional
 
 from langgraph.graph import StateGraph, END
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.agents.time_agent import TimeAgent
 from src.agents.plan_agent import PlanAgent
@@ -76,6 +77,9 @@ class FlowForgeState(dict):
     improvement_prompt: Optional[str]
     corrective_prompt: Optional[str]
     failed_diagrams: list[dict]
+
+    # Audience
+    audience_type: str  # "engineer" | "stakeholder"
 
     # Retry tracking
     time_retry_count: int
@@ -254,6 +258,7 @@ def run_flowforge_workflow(
     tech_stack: list[str] | None = None,
     priority: str = "medium",
     diagram_types: list[str] | None = None,
+    audience_type: str = "engineer",
     optimize_prompt: bool = True,
     max_retries: int = 3,
     session_manager: Optional[SessionManager] = None,
@@ -297,17 +302,24 @@ def run_flowforge_workflow(
             logger.warning("Prompt optimization failed, using original prompt: %s", exc)
 
     if not session_manager:
-        session_manager = SessionManager()
-        session_manager.create_session(
-            proposal=proposal,
-            prompt=prompt,
-            project_title=project_title,
-            timeline_weeks=timeline_weeks,
-            team_size=team_size,
-            tech_stack=tech_stack,
-            priority=priority,
-            diagram_types=diagram_types,
-        )
+        try:
+            session_manager = SessionManager()
+            session_manager.create_session(
+                proposal=proposal,
+                prompt=prompt,
+                project_title=project_title,
+                timeline_weeks=timeline_weeks,
+                team_size=team_size,
+                tech_stack=tech_stack,
+                priority=priority,
+                diagram_types=diagram_types,
+            )
+        except (SQLAlchemyError, OSError, Exception) as exc:
+            import logging
+            logging.getLogger("app").warning(
+                "Database unavailable — running without session persistence: %s", exc
+            )
+            session_manager = None
 
     workflow = create_flowforge_workflow(
         session_manager=session_manager
@@ -323,6 +335,7 @@ def run_flowforge_workflow(
         tech_stack=tech_stack or [],
         priority=priority,
         diagram_types=diagram_types or ["workflow", "ci_cd"],
+        audience_type=audience_type,
         optimized_prompt=optimized_prompt,
         timetable=None,
         milestones=[],

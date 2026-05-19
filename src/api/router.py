@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError as DBOperationalError, SQLAlchemyError
 
 from src import app
 from src.api.dependencies import get_hf_token
@@ -100,6 +101,7 @@ async def generate_diagrams(
             tech_stack=proposal_data.tech_stack or [],
             priority=prompt_data.priority,
             diagram_types=[dt.value for dt in prompt_data.diagram_types],
+            audience_type=prompt_data.audience_type.value,
             optimize_prompt=prompt_data.optimize_prompt,
         )
 
@@ -119,6 +121,15 @@ async def generate_diagrams(
     except ValueError as exc:
         logger.warning("Validation error in diagram generation request: %s", str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
+    except (DBOperationalError, SQLAlchemyError) as exc:
+        logger.error("Database error during diagram generation: %s", str(exc), exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database unavailable. Check DATABASE_URL in your environment "
+                f"and restart the server. Details: {str(exc)}"
+            ),
+        )
     except Exception as exc:
         logger.error("Unexpected error during diagram generation: %s", str(exc), exc_info=True)
         raise HTTPException(

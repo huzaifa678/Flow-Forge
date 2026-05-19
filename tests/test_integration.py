@@ -458,3 +458,313 @@ class TestWorkflowAndResponseFormattingIntegration(unittest.TestCase):
         workflow = create_flowforge_workflow()
 
         mock_create.assert_called_once()
+
+
+class TestAudienceTypeAPIIntegration(unittest.TestCase):
+    """Integration tests verifying audience_type flows through the API layer."""
+
+    def setUp(self):
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    def _base_stakeholder_payload(self, **prompt_overrides):
+        payload = {
+            "proposal": {
+                "title": "Customer Portal Project",
+                "description": "A self-service portal for enterprise customers to manage their accounts.",
+                "requirements": ["User login", "Account management", "Reports"],
+                "constraints": ["Launch within 6 months"],
+                "tech_stack": ["React", "FastAPI"],
+                "timeline_weeks": 24,
+                "team_size": 6,
+            },
+            "prompt": {
+                "user_prompt": "Generate a high-level overview for the board presentation",
+                "diagram_types": ["flowchart", "gantt"],
+                "optimize_prompt": False,
+                "priority": "high",
+                "audience_type": "stakeholder",
+                **prompt_overrides,
+            },
+            "hf_token": "test-hf-token",
+        }
+        return payload
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_stakeholder_audience_type_passed_to_workflow(self, mock_get_token, mock_run_workflow):
+        """Verify audience_type='stakeholder' is forwarded from the API request to the workflow."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Customer Portal Project",
+            "diagrams": [
+                {
+                    "diagram_type": "flowchart",
+                    "mermaid_code": "graph TD\n    A[Phase 1] --> B[Phase 2]",
+                    "is_valid": True,
+                    "title": "Project Phases",
+                }
+            ],
+            "diagram_count": 1,
+            "valid_diagram_count": 1,
+            "validation_results": [{"is_valid": True, "diagram_type": "flowchart"}],
+            "overall_validation": True,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json=self._base_stakeholder_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        # Verify the workflow was called with audience_type="stakeholder"
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "stakeholder")
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_engineer_audience_type_passed_to_workflow(self, mock_get_token, mock_run_workflow):
+        """Verify audience_type='engineer' is forwarded from the API request to the workflow."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Test Project",
+            "diagrams": [],
+            "diagram_count": 0,
+            "valid_diagram_count": 0,
+            "overall_validation": False,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Backend Microservices",
+                    "description": "Refactor monolith into microservices architecture.",
+                },
+                "prompt": {
+                    "user_prompt": "Generate system design and CI/CD diagrams",
+                    "diagram_types": ["system_design", "ci_cd"],
+                    "optimize_prompt": False,
+                    "priority": "medium",
+                    "audience_type": "engineer",
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "engineer")
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_default_audience_type_is_engineer(self, mock_get_token, mock_run_workflow):
+        """When audience_type is omitted it should default to 'engineer'."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Test",
+            "diagrams": [],
+            "diagram_count": 0,
+            "valid_diagram_count": 0,
+            "overall_validation": False,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Default Audience Test",
+                    "description": "Testing default audience type behaviour.",
+                },
+                "prompt": {
+                    "user_prompt": "Generate a simple workflow diagram please",
+                    "diagram_types": ["workflow"],
+                    "optimize_prompt": False,
+                    "priority": "low",
+                    # audience_type intentionally omitted
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        _, kwargs = mock_run_workflow.call_args
+        self.assertEqual(kwargs.get("audience_type"), "engineer")
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_stakeholder_response_contains_business_diagram_types(self, mock_get_token, mock_run_workflow):
+        """A stakeholder response should only contain flowchart/gantt/architecture diagrams."""
+        mock_get_token.return_value = "test-hf-token"
+        mock_run_workflow.return_value = {
+            "proposal_summary": "Customer Portal",
+            "diagrams": [
+                {"diagram_type": "flowchart", "mermaid_code": "graph TD\n    A --> B", "is_valid": True, "title": "Project Phases"},
+                {"diagram_type": "gantt", "mermaid_code": "gantt\ntitle Timeline\nsection A\nTask :a1, 2026-05-14, 5d", "is_valid": True, "title": "Timeline"},
+            ],
+            "diagram_count": 2,
+            "valid_diagram_count": 2,
+            "overall_validation": True,
+            "current_agent": "validator_agent",
+            "error": None,
+        }
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json=self._base_stakeholder_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        allowed = {"flowchart", "gantt", "architecture"}
+        for diagram in data["diagrams"]:
+            self.assertIn(
+                diagram["diagram_type"],
+                allowed,
+                f"Unexpected diagram type for stakeholder: {diagram['diagram_type']}",
+            )
+
+    @patch('src.api.router.run_flowforge_workflow')
+    @patch('src.api.router.get_hf_token')
+    def test_invalid_audience_type_rejected(self, mock_get_token, mock_run_workflow):
+        """An unrecognised audience_type value should be rejected with 422."""
+        mock_get_token.return_value = "test-hf-token"
+
+        response = self.client.post(
+            "/api/v1/generate-diagrams",
+            json={
+                "proposal": {
+                    "title": "Test Project",
+                    "description": "Test project description here.",
+                },
+                "prompt": {
+                    "user_prompt": "Generate workflow diagrams please",
+                    "diagram_types": ["workflow"],
+                    "optimize_prompt": False,
+                    "priority": "medium",
+                    "audience_type": "cto",  # invalid
+                },
+                "hf_token": "test-hf-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+
+class TestStakeholderWorkflowIntegration(unittest.TestCase):
+    """Integration tests for the stakeholder workflow end-to-end."""
+
+    @patch('src.workflow.graph_workflow.SessionManager')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_stakeholder_workflow_produces_valid_api_response(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time_validator,
+        mock_time,
+        mock_session_manager,
+    ):
+        """Full workflow with audience_type=stakeholder should produce a valid formatted response."""
+        mock_time.return_value.execute.return_value = {
+            "timetable": "gantt\ntitle Portal\nsection Design\nUI :a1, 2026-05-14, 7d",
+            "milestones": ["Design complete", "Build complete", "Launch"],
+            "parallel_work_streams": ["Frontend", "Backend"],
+            "error": None,
+        }
+        mock_time_validator.return_value.execute.return_value = {
+            "time_overall_validation": True,
+            "time_validation_results": [],
+            "error": None,
+        }
+        mock_plan.return_value.execute.return_value = {
+            "plan": "Phase 1: Discovery\nPhase 2: Build\nPhase 3: Launch",
+            "error": None,
+        }
+        mock_image.return_value.execute.return_value = {
+            "diagrams": [
+                {"diagram_type": "flowchart", "mermaid_code": "graph TD\n    A --> B", "is_valid": True, "title": "Project Phases"},
+                {"diagram_type": "gantt", "mermaid_code": "gantt\ntitle Timeline\nsection A\nTask :a1, 2026-05-14, 5d", "is_valid": True, "title": "Timeline"},
+            ],
+            "diagram_count": 2,
+            "valid_diagram_count": 2,
+            "error": None,
+        }
+        mock_validator.return_value.execute.return_value = {
+            "validation_results": [
+                {"is_valid": True, "diagram_type": "flowchart"},
+                {"is_valid": True, "diagram_type": "gantt"},
+            ],
+            "overall_validation": True,
+            "valid_count": 2,
+            "total_count": 2,
+            "error": None,
+        }
+
+        result = run_flowforge_workflow(
+            proposal="Build a customer portal",
+            prompt="Executive summary diagrams",
+            hf_token="test-token",
+            audience_type="stakeholder",
+            diagram_types=["flowchart", "gantt"],
+            optimize_prompt=False,
+        )
+
+        response = format_workflow_response(result)
+
+        self.assertEqual(response["status"], "success")
+        self.assertIsNotNone(response["timeline"])
+        self.assertEqual(len(response["diagrams"]), 2)
+        self.assertTrue(response["overall_validation"])
+
+        for diagram in response["diagrams"]:
+            self.assertIn(diagram["diagram_type"], ["flowchart", "gantt", "architecture"])
+
+    @patch('src.workflow.graph_workflow.SessionManager')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_audience_type_preserved_in_final_state(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time_validator,
+        mock_time,
+        mock_session_manager,
+    ):
+        """audience_type should be preserved in the final workflow state."""
+        for agent_mock in [mock_time, mock_time_validator, mock_plan, mock_image, mock_validator]:
+            agent_mock.return_value.execute.return_value = {
+                "timetable": "Phase 1",
+                "milestones": [],
+                "parallel_work_streams": [],
+                "plan": "plan",
+                "diagrams": [],
+                "diagram_count": 0,
+                "valid_diagram_count": 0,
+                "validation_results": [],
+                "overall_validation": True,
+                "time_overall_validation": True,
+                "error": None,
+            }
+
+        result = run_flowforge_workflow(
+            proposal="Test proposal",
+            prompt="Test prompt",
+            hf_token="test-token",
+            audience_type="stakeholder",
+            optimize_prompt=False,
+        )
+
+        self.assertEqual(result.get("audience_type"), "stakeholder")
