@@ -53,6 +53,7 @@ def build_pdf(diagrams):
     MAX_WIDTH = 500
     MAX_HEIGHT = 700
 
+    first = True
     for diagram in diagrams_sorted:
         name = diagram.get("title") or diagram.get("diagram_type", "diagram")
 
@@ -83,6 +84,10 @@ def build_pdf(diagrams):
             height=new_height,
         )
 
+        if not first:
+            elements.append(PageBreak())
+        first = False
+
         elements.append(
             Paragraph(
                 f"<b>{name}</b>",
@@ -93,10 +98,6 @@ def build_pdf(diagrams):
         elements.append(Spacer(1, 20))
 
         elements.append(img)
-
-        elements.append(Spacer(1, 40))
-
-        elements.append(PageBreak())
 
     doc.build(elements)
 
@@ -188,9 +189,6 @@ def build_stakeholder_pdf(diagrams: list, proposal: dict) -> BytesIO:
         ["Budget Range", proposal.get("budget_range") or "To be determined"],
         ["Priority", (proposal.get("priority") or "medium").capitalize()],
     ]
-    tech = proposal.get("tech_stack") or []
-    if tech:
-        metrics.append(["Technology", ", ".join(tech)])
 
     tbl = Table(metrics, colWidths=[4 * cm, 12 * cm])
     tbl.setStyle(TableStyle([
@@ -243,6 +241,7 @@ def build_stakeholder_pdf(diagrams: list, proposal: dict) -> BytesIO:
     MAX_WIDTH = 470
     MAX_HEIGHT = 650
 
+    first = True
     for diagram in diagrams_sorted:
         image_base64 = diagram.get("image_data")
         if not image_base64:
@@ -264,12 +263,14 @@ def build_stakeholder_pdf(diagrams: list, proposal: dict) -> BytesIO:
         }
         name = friendly_names.get(diagram_type, diagram.get("title", diagram_type))
 
+        if not first:
+            elements.append(PageBreak())
+        first = False
+
         elements.append(Paragraph(name, section_style))
         elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.lightgrey))
         elements.append(Spacer(1, 0.4 * cm))
         elements.append(RLImage(BytesIO(image_bytes), width=orig_w * ratio, height=orig_h * ratio))
-        elements.append(Spacer(1, 0.5 * cm))
-        elements.append(PageBreak())
 
     doc.build(elements)
     buffer.seek(0)

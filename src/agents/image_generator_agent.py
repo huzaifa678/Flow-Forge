@@ -33,7 +33,9 @@ class ImageGeneratorAgent(BaseAgent):
         DiagramType.FLOWCHART: {
             "system_role": (
                 "You are a business analyst presenting project phases to executive stakeholders. "
-                "Use plain business language. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+                "Use plain business language. FOCUS ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT include CI/CD pipelines, API gateways, microservices, "
+                "infrastructure components, tech stack names, or any engineering implementation detail."
             ),
             "requirements": (
                 "- Use graph TD syntax\n"
@@ -42,6 +44,8 @@ class ImageGeneratorAgent(BaseAgent):
                 "- Use {} for approvals/decisions, [] for phases\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN nodes: anything referencing Docker, Kubernetes, APIs, databases by name, "
+                "CI/CD, deployments, or infrastructure\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    Discovery[Discovery & Planning] --> Approval1{Stakeholder Approval}\n"
@@ -60,13 +64,17 @@ class ImageGeneratorAgent(BaseAgent):
         DiagramType.GANTT: {
             "system_role": (
                 "You are a project manager presenting a milestone timeline to business stakeholders. "
-                "Show only key milestones and phases. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+                "Show only key milestones and phases. FOCUS ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT include sprint names, deployment pipelines, infra setup tasks, "
+                "or any technical engineering work items — only business-visible milestones and phases."
             ),
             "requirements": (
                 "- You MUST start with 'gantt' on the first line\n"
                 "- You MUST include 'title' and 'dateFormat YYYY-MM-DD'\n"
                 "- Use 'section' for phases; keep task names business-friendly\n"
                 "- Mark final deliverables as milestones\n"
+                "- FORBIDDEN tasks: CI/CD setup, infrastructure provisioning, technical spike, "
+                "docker build, kubernetes config, or any engineering-internal task\n"
                 "- Example:\n"
                 "gantt\n"
                 "    title Project Milestones\n"
@@ -84,14 +92,17 @@ class ImageGeneratorAgent(BaseAgent):
         DiagramType.ARCHITECTURE: {
             "system_role": (
                 "You are presenting a high-level solution overview to non-technical stakeholders. "
-                "Use business capability names, not technology names. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+                "Use business capability names, not technology names. FOCUS ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT include Docker, Kubernetes, Redis, Kafka, PostgreSQL, API Gateway, "
+                "microservice names, infrastructure layers, or any technology product names."
             ),
             "requirements": (
                 "- Use graph TD syntax with subgraph to show capability areas\n"
                 "- Label components with business capabilities (e.g. 'Customer Portal', 'Reporting', 'Data Storage')\n"
-                "- Avoid acronyms and technical terms\n"
+                "- Avoid ALL acronyms and technical terms\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN nodes: anything named after a technology product, protocol, or infrastructure service\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    subgraph Users[Users]\n"
@@ -123,13 +134,17 @@ class ImageGeneratorAgent(BaseAgent):
 
     DIAGRAM_TEMPLATES = {
         DiagramType.WORKFLOW: {
-            "system_role": "You are an expert workflow diagram designer. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an expert workflow diagram designer. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT produce a high-level business-only phase diagram — show the actual technical workflow with real system steps, services, and decision logic."
+            ),
             "requirements": (
                 "- Use graph TD syntax\n"
-                "- Show the actual project workflow with decision points\n"
+                "- Show the actual technical project workflow with decision points and real system steps\n"
                 "- Use {} for decisions, [] for processes\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase (no spaces)\n"
+                "- FORBIDDEN: Do NOT use vague phase labels like 'Phase 1', 'Delivery', 'Go Live' — use real technical process names\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    Start[Project Start] --> Req[Requirements Analysis]\n"
@@ -144,13 +159,17 @@ class ImageGeneratorAgent(BaseAgent):
             ),
         },
         DiagramType.CI_CD: {
-            "system_role": "You are an expert CI/CD architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an expert CI/CD architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT replace CI/CD stages with business phase names — this diagram is for engineers and must show real pipeline stages."
+            ),
             "requirements": (
                 "- Use graph TD syntax\n"
                 "- Show actual CI/CD pipeline stages: code commit, build, test, deploy\n"
                 "- Include branch strategy and rollback paths\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN: Do NOT use business language like 'Approval', 'Launch', 'Delivery Phase' — use real CI/CD terminology\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    Commit[Code Commit] --> Build[Docker Build]\n"
@@ -165,13 +184,17 @@ class ImageGeneratorAgent(BaseAgent):
             ),
         },
         DiagramType.SYSTEM_DESIGN: {
-            "system_role": "You are an expert system architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an expert system architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT abstract away real technical components — name actual services, databases, queues, and APIs from the project."
+            ),
             "requirements": (
                 "- Use graph TD syntax\n"
                 "- Show actual system components: API gateway, services, databases, caches, queues\n"
                 "- Show data flow between components with labeled arrows\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN: Do NOT use generic labels like 'Backend', 'Storage', 'Business Logic' — use real technical component names\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    Client[Web Client] --> Gateway[API Gateway]\n"
@@ -186,13 +209,17 @@ class ImageGeneratorAgent(BaseAgent):
             ),
         },
         DiagramType.FLOWCHART: {
-            "system_role": "You are an expert business process analyst. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an expert technical process analyst. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT produce a vague business-phase-only diagram — show the actual technical process flow with real system steps and decision logic."
+            ),
             "requirements": (
                 "- Use graph TD syntax\n"
-                "- Show the project phases as a process flow with decision branches\n"
+                "- Show the technical process flow with real system steps and decision branches\n"
                 "- Use {} for decisions, [] for steps\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN: Do NOT use purely business-language labels like 'Stakeholder Approval', 'Go Live', 'Business Review'\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    Discovery[Discovery Phase] --> DesignReady{Design Ready?}\n"
@@ -208,12 +235,17 @@ class ImageGeneratorAgent(BaseAgent):
             ),
         },
         DiagramType.ARCHITECTURE: {
-            "system_role": "You are an enterprise architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an enterprise architect. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT abstract real infrastructure into vague business capability names — show actual technical architecture layers with real component names."
+            ),
             "requirements": (
                 "- Use graph TD syntax with subgraph to show architecture layers\n"
                 "- Show infrastructure layers: Client, API, Services, Data, Infrastructure\n"
+                "- Name real technical components (e.g. PostgreSQL, Redis, Kafka, API Gateway)\n"
                 "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
                 "- Node IDs must be single words or camelCase\n"
+                "- FORBIDDEN: Do NOT use only business capability labels like 'Customer Portal', 'Business Logic', 'Data Store' — include real technical names\n"
                 "- Example:\n"
                 "graph TD\n"
                 "    subgraph ClientLayer[Client Layer]\n"
@@ -238,12 +270,18 @@ class ImageGeneratorAgent(BaseAgent):
             ),
         },
         DiagramType.GANTT: {
-            "system_role": "You are an expert project manager. REMEMBER generate the code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
+            "system_role": (
+                "You are an expert project manager creating a technical delivery timeline for engineers. "
+                "REMEMBER generate the code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN. "
+                "FORBIDDEN: Do NOT use only business milestone names — include actual engineering tasks like backend development, API integration, testing, CI/CD setup, and deployment."
+            ),
             "requirements": (
                 "- You MUST start with 'gantt' on the first line — no other syntax\n"
                 "- You MUST include 'title' and 'dateFormat YYYY-MM-DD'\n"
                 "- Use 'section' to group tasks by phase\n"
                 "- Each task: TaskName :id, startDate_or_after_dep, duration\n"
+                "- Include engineering tasks: backend dev, frontend dev, API integration, testing, CI/CD, deployment\n"
+                "- FORBIDDEN: Do NOT produce only high-level business milestones — engineers need task-level detail\n"
                 "- Example:\n"
                 "gantt\n"
                 "    title Project Timeline\n"

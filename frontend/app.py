@@ -62,7 +62,7 @@ def main() -> None:
     )
 
     with tab1:
-        render_project_form()
+        render_project_form(is_stakeholder=is_stakeholder)
 
     with tab2:
         st.text_area(
