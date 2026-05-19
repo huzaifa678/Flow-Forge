@@ -21,6 +21,8 @@ DEFAULT_STATE = {
     "optimize_prompt": True,
     "include_gantt": True,
     "diagram_types_sel": ["workflow", "ci_cd", "system_design", "flowchart", "architecture", "gantt"],
+    "audience_type": "engineer",
+    "recipient_email": "",
 }
 
 

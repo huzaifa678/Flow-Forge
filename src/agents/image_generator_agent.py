@@ -25,6 +25,102 @@ except ImportError:
 class ImageGeneratorAgent(BaseAgent):
     """Generate Mermaid diagrams from project plans."""
 
+    # Diagram types relevant to each audience
+    STAKEHOLDER_DIAGRAM_TYPES = {DiagramType.FLOWCHART, DiagramType.GANTT, DiagramType.ARCHITECTURE}
+
+    # Stakeholder-focused templates: business language, no technical jargon
+    STAKEHOLDER_DIAGRAM_TEMPLATES = {
+        DiagramType.FLOWCHART: {
+            "system_role": (
+                "You are a business analyst presenting project phases to executive stakeholders. "
+                "Use plain business language. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+            ),
+            "requirements": (
+                "- Use graph TD syntax\n"
+                "- Show high-level business phases and decision gates — NO technical jargon\n"
+                "- Label decisions with business outcomes (Approved / Needs Revision)\n"
+                "- Use {} for approvals/decisions, [] for phases\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    Discovery[Discovery & Planning] --> Approval1{Stakeholder Approval}\n"
+                "    Approval1 -->|Approved| Design[Design & Prototype]\n"
+                "    Approval1 -->|Needs Revision| Discovery\n"
+                "    Design --> Review1{Design Review}\n"
+                "    Review1 -->|Approved| Build[Build & Deliver]\n"
+                "    Review1 -->|Needs Revision| Design\n"
+                "    Build --> UAT[User Acceptance Testing]\n"
+                "    UAT --> Launch{Ready to Launch?}\n"
+                "    Launch -->|Yes| GoLive[Go Live]\n"
+                "    Launch -->|No| Build\n"
+                "    GoLive --> Support[Ongoing Support]"
+            ),
+        },
+        DiagramType.GANTT: {
+            "system_role": (
+                "You are a project manager presenting a milestone timeline to business stakeholders. "
+                "Show only key milestones and phases. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+            ),
+            "requirements": (
+                "- You MUST start with 'gantt' on the first line\n"
+                "- You MUST include 'title' and 'dateFormat YYYY-MM-DD'\n"
+                "- Use 'section' for phases; keep task names business-friendly\n"
+                "- Mark final deliverables as milestones\n"
+                "- Example:\n"
+                "gantt\n"
+                "    title Project Milestones\n"
+                "    dateFormat YYYY-MM-DD\n"
+                "    section Initiation\n"
+                "    Project Kickoff :a1, 2026-05-14, 5d\n"
+                "    section Planning\n"
+                "    Business Requirements :a2, after a1, 7d\n"
+                "    section Delivery\n"
+                "    Build & Test :a3, after a2, 21d\n"
+                "    section Launch\n"
+                "    Go Live :milestone, after a3, 0d"
+            ),
+        },
+        DiagramType.ARCHITECTURE: {
+            "system_role": (
+                "You are presenting a high-level solution overview to non-technical stakeholders. "
+                "Use business capability names, not technology names. FOCUS ON the input PROPOSAL and PROMPT GIVEN."
+            ),
+            "requirements": (
+                "- Use graph TD syntax with subgraph to show capability areas\n"
+                "- Label components with business capabilities (e.g. 'Customer Portal', 'Reporting', 'Data Storage')\n"
+                "- Avoid acronyms and technical terms\n"
+                "- All node labels with spaces MUST use brackets: A[Label With Spaces]\n"
+                "- Node IDs must be single words or camelCase\n"
+                "- Example:\n"
+                "graph TD\n"
+                "    subgraph Users[Users]\n"
+                "        Customers[Customers]\n"
+                "        Admins[Administrators]\n"
+                "    end\n"
+                "    subgraph Platform[Platform]\n"
+                "        Portal[Customer Portal]\n"
+                "        Reports[Reporting Dashboard]\n"
+                "    end\n"
+                "    subgraph Backend[Business Logic]\n"
+                "        Processing[Order Processing]\n"
+                "        Notifications[Notifications]\n"
+                "    end\n"
+                "    subgraph Storage[Data]\n"
+                "        Records[Business Records]\n"
+                "        Analytics[Analytics Store]\n"
+                "    end\n"
+                "    Customers --> Portal\n"
+                "    Admins --> Reports\n"
+                "    Portal --> Processing\n"
+                "    Processing --> Records\n"
+                "    Processing --> Notifications\n"
+                "    Records --> Analytics\n"
+                "    Analytics --> Reports"
+            ),
+        },
+    }
+
     DIAGRAM_TEMPLATES = {
         DiagramType.WORKFLOW: {
             "system_role": "You are an expert workflow diagram designer. REMEMBER generate the mermaid code by FOCUSING ON the input PROPOSAL and PROMPT GIVEN",
@@ -227,11 +323,13 @@ class ImageGeneratorAgent(BaseAgent):
         plan: str,
         diagram_type: DiagramType,
         timeline: Optional[str] = None,
+        audience_type: str = "engineer",
     ) -> str:
         """Build prompt for diagram generation."""
         self.logger.info(
-            "Building prompt for diagram_type=%s",
+            "Building prompt for diagram_type=%s audience=%s",
             diagram_type.value,
+            audience_type,
         )
 
         self.logger.info(
@@ -240,10 +338,16 @@ class ImageGeneratorAgent(BaseAgent):
             len(timeline) if timeline else 0,
         )
 
-        template_config = self.DIAGRAM_TEMPLATES.get(
-            diagram_type,
-            self.DIAGRAM_TEMPLATES[DiagramType.FLOWCHART],
-        )
+        if audience_type == "stakeholder":
+            template_config = self.STAKEHOLDER_DIAGRAM_TEMPLATES.get(
+                diagram_type,
+                self.STAKEHOLDER_DIAGRAM_TEMPLATES[DiagramType.FLOWCHART],
+            )
+        else:
+            template_config = self.DIAGRAM_TEMPLATES.get(
+                diagram_type,
+                self.DIAGRAM_TEMPLATES[DiagramType.FLOWCHART],
+            )
 
         prompt_template = PromptTemplate(
     input_variables=[
@@ -613,6 +717,7 @@ Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text aft
         plan: str,
         diagram_type: DiagramType,
         timeline: Optional[str] = None,
+        audience_type: str = "engineer",
     ) -> dict[str, Any]:
         """Generate a Mermaid diagram."""
         try:
@@ -643,6 +748,7 @@ Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text aft
                 plan,
                 diagram_type,
                 timeline,
+                audience_type=audience_type,
             )
 
             response = self._chat_completion_with_retry(
@@ -777,6 +883,7 @@ Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text aft
 
             plan = state.get("plan")
             timeline = state.get("timetable")
+            audience_type = state.get("audience_type", "engineer")
 
             improvement_prompt = state.get("improvement_prompt")
             if improvement_prompt:
@@ -842,6 +949,19 @@ Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text aft
                 len(diagram_types),
             )
 
+            # Stakeholders only receive business-friendly diagram types
+            if audience_type == "stakeholder":
+                diagram_types = [
+                    dt for dt in diagram_types
+                    if dt in self.STAKEHOLDER_DIAGRAM_TYPES
+                ]
+                if not diagram_types:
+                    diagram_types = [DiagramType.FLOWCHART, DiagramType.GANTT]
+                self.logger.info(
+                    "Stakeholder audience: filtered to %d diagram types.",
+                    len(diagram_types),
+                )
+
             diagrams = []
 
             previous_invalid = self._get_previous_invalid_output("diagrams")
@@ -862,6 +982,7 @@ Output ONLY the Mermaid diagram. No markdown fences. No explanation. No text aft
                     plan=plan,
                     diagram_type=diagram_type,
                     timeline=timeline,
+                    audience_type=audience_type,
                 )
 
                 self.logger.info(

@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch, MagicMock
 import os
 import sys
 
-from src.schemas.request import PromptRequest
+from src.schemas.request import PromptRequest, AudienceType
 from src.pipeline.prompt_optimizer import PromptOptimizer
 
 # Add src to path for imports
@@ -20,6 +20,7 @@ from src.agents.time_validator_agent import TimeValidatorAgent
 from src.workflow.graph_workflow import create_flowforge_workflow
 from src.schemas.request import (
     DiagramType,
+    AudienceType,
 )
 
 
@@ -716,6 +717,34 @@ FEEDBACK: Timeline lacks proper structure."""
         self.assertIn("TIMETABLE", corrective)
 
 
+class TestAudienceType(unittest.TestCase):
+    """Test cases for the AudienceType enum."""
+
+    def test_enum_values(self):
+        """Test that AudienceType has expected values."""
+        self.assertEqual(AudienceType.ENGINEER.value, "engineer")
+        self.assertEqual(AudienceType.STAKEHOLDER.value, "stakeholder")
+
+    def test_enum_from_string_engineer(self):
+        """Test constructing AudienceType from string."""
+        self.assertEqual(AudienceType("engineer"), AudienceType.ENGINEER)
+
+    def test_enum_from_string_stakeholder(self):
+        """Test constructing AudienceType from string."""
+        self.assertEqual(AudienceType("stakeholder"), AudienceType.STAKEHOLDER)
+
+    def test_enum_invalid_value(self):
+        """Test that invalid audience type raises ValueError."""
+        with self.assertRaises(ValueError):
+            AudienceType("manager")
+
+    def test_enum_is_string(self):
+        """Test AudienceType is a str enum — value serialises as plain string."""
+        self.assertIsInstance(AudienceType.ENGINEER, str)
+        # .value gives the raw string; str() on a str-enum member returns the value in 3.11
+        self.assertEqual(AudienceType.STAKEHOLDER.value, "stakeholder")
+
+
 class TestSchemaModels(unittest.TestCase):
     """Test cases for Pydantic schema models."""
 
@@ -740,6 +769,36 @@ class TestSchemaModels(unittest.TestCase):
         self.assertEqual(len(prompt.diagram_types), 2)
         self.assertEqual(prompt.diagram_types[0], DiagramType.WORKFLOW)
         self.assertEqual(prompt.diagram_types[1], DiagramType.CI_CD)
+
+    def test_prompt_request_default_audience_is_engineer(self):
+        """Test that audience_type defaults to engineer."""
+        prompt = PromptRequest(user_prompt="Generate diagrams for my project")
+        self.assertEqual(prompt.audience_type, AudienceType.ENGINEER)
+
+    def test_prompt_request_stakeholder_audience(self):
+        """Test explicitly setting audience_type to stakeholder."""
+        prompt = PromptRequest(
+            user_prompt="Generate stakeholder presentation",
+            audience_type="stakeholder",
+        )
+        self.assertEqual(prompt.audience_type, AudienceType.STAKEHOLDER)
+
+    def test_prompt_request_engineer_audience(self):
+        """Test explicitly setting audience_type to engineer."""
+        prompt = PromptRequest(
+            user_prompt="Generate technical diagrams",
+            audience_type="engineer",
+        )
+        self.assertEqual(prompt.audience_type, AudienceType.ENGINEER)
+
+    def test_prompt_request_invalid_audience_raises(self):
+        """Test that an unrecognised audience_type is rejected."""
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            PromptRequest(
+                user_prompt="Generate diagrams",
+                audience_type="cto",
+            )
 
 
 class TestWorkflow(unittest.TestCase):
@@ -1079,6 +1138,489 @@ class TestWorkflow(unittest.TestCase):
         # Setting values
         state.timetable = "Phase 1"
         self.assertEqual(state["timetable"], "Phase 1")
+
+
+class TestStakeholderDiagramAgent(unittest.TestCase):
+    """Tests for stakeholder-specific diagram generation behaviour."""
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_stakeholder_templates_exist_for_all_required_types(self, mock_llm):
+        """Stakeholder templates must exist for flowchart, gantt, architecture."""
+        agent = ImageGeneratorAgent()
+        for dt in [DiagramType.FLOWCHART, DiagramType.GANTT, DiagramType.ARCHITECTURE]:
+            self.assertIn(dt, agent.STAKEHOLDER_DIAGRAM_TEMPLATES)
+            tmpl = agent.STAKEHOLDER_DIAGRAM_TEMPLATES[dt]
+            self.assertIn("system_role", tmpl)
+            self.assertIn("requirements", tmpl)
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_stakeholder_template_system_role_is_business_language(self, mock_llm):
+        """Stakeholder flowchart role should mention stakeholders / business."""
+        agent = ImageGeneratorAgent()
+        role = agent.STAKEHOLDER_DIAGRAM_TEMPLATES[DiagramType.FLOWCHART]["system_role"].lower()
+        self.assertTrue(
+            "stakeholder" in role or "business" in role,
+            "Stakeholder system_role should reference business audience",
+        )
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_stakeholder_diagram_types_set_contains_correct_members(self, mock_llm):
+        """STAKEHOLDER_DIAGRAM_TYPES should include only business-friendly types."""
+        agent = ImageGeneratorAgent()
+        expected = {DiagramType.FLOWCHART, DiagramType.GANTT, DiagramType.ARCHITECTURE}
+        self.assertEqual(agent.STAKEHOLDER_DIAGRAM_TYPES, expected)
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_build_prompt_uses_stakeholder_template_when_audience_is_stakeholder(self, mock_llm):
+        """_build_diagram_prompt should return stakeholder template content for stakeholder audience."""
+        agent = ImageGeneratorAgent()
+        prompt = agent._build_diagram_prompt(
+            plan="Build a customer portal",
+            diagram_type=DiagramType.FLOWCHART,
+            timeline=None,
+            audience_type="stakeholder",
+        )
+        stakeholder_role = agent.STAKEHOLDER_DIAGRAM_TEMPLATES[DiagramType.FLOWCHART]["system_role"]
+        self.assertIn(stakeholder_role[:30], prompt)
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_build_prompt_uses_engineer_template_when_audience_is_engineer(self, mock_llm):
+        """_build_diagram_prompt should return engineer template content for engineer audience."""
+        agent = ImageGeneratorAgent()
+        prompt = agent._build_diagram_prompt(
+            plan="Build a customer portal",
+            diagram_type=DiagramType.FLOWCHART,
+            timeline=None,
+            audience_type="engineer",
+        )
+        engineer_role = agent.DIAGRAM_TEMPLATES[DiagramType.FLOWCHART]["system_role"]
+        self.assertIn(engineer_role[:30], prompt)
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_execute_filters_engineer_diagrams_for_stakeholder(self, mock_llm):
+        """execute() must keep only stakeholder-valid diagram types when audience=stakeholder."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="graph TD\n    A[Start] --> B[End]"
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = ImageGeneratorAgent()
+        state = {
+            "plan": "Build a portal",
+            # Engineer diagram types requested — should be filtered down
+            "diagram_types": ["workflow", "ci_cd", "system_design", "flowchart", "gantt"],
+            "timetable": "Phase 1",
+            "audience_type": "stakeholder",
+        }
+        result = agent.execute(state)
+
+        for diagram in result["diagrams"]:
+            self.assertIn(
+                diagram["diagram_type"],
+                ["flowchart", "gantt", "architecture"],
+                "Stakeholder output must not contain technical engineer-only diagram types",
+            )
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_execute_uses_all_requested_diagrams_for_engineer(self, mock_llm):
+        """execute() must not filter diagram types when audience=engineer."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="graph TD\n    A[Start] --> B[End]"
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = ImageGeneratorAgent()
+        requested = ["workflow", "ci_cd"]
+        state = {
+            "plan": "Build a portal",
+            "diagram_types": requested,
+            "timetable": "Phase 1",
+            "audience_type": "engineer",
+        }
+        result = agent.execute(state)
+        returned_types = [d["diagram_type"] for d in result["diagrams"]]
+        for dt in requested:
+            self.assertIn(dt, returned_types)
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_execute_falls_back_to_flowchart_gantt_when_no_stakeholder_types_requested(self, mock_llm):
+        """If stakeholder mode is active but no stakeholder diagram types were selected, use defaults."""
+        mock_instance = Mock()
+        mock_instance.chat_completion.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(
+                content="graph TD\n    A[Start] --> B[End]"
+            ))]
+        )
+        mock_llm.return_value = mock_instance
+
+        agent = ImageGeneratorAgent()
+        state = {
+            "plan": "Build a portal",
+            "diagram_types": ["workflow", "ci_cd", "system_design"],  # none in stakeholder set
+            "timetable": "Phase 1",
+            "audience_type": "stakeholder",
+        }
+        result = agent.execute(state)
+        # Should have generated diagrams using fallback types
+        self.assertGreater(result["diagram_count"], 0)
+        for diagram in result["diagrams"]:
+            self.assertIn(diagram["diagram_type"], ["flowchart", "gantt", "architecture"])
+
+    @patch('src.agents.image_generator_agent.InferenceClient')
+    def test_generate_diagram_passes_audience_type_to_prompt(self, mock_llm):
+        """generate_diagram() with audience_type=stakeholder should use stakeholder prompt."""
+        mock_instance = Mock()
+        captured_messages = []
+
+        def capture_call(messages, max_tokens):
+            captured_messages.extend(messages)
+            return MagicMock(
+                choices=[MagicMock(message=MagicMock(
+                    content="graph TD\n    A[Phase] --> B[Done]"
+                ))]
+            )
+
+        mock_instance.chat_completion.side_effect = capture_call
+        mock_llm.return_value = mock_instance
+
+        agent = ImageGeneratorAgent()
+        agent.generate_diagram(
+            plan="Build customer portal",
+            diagram_type=DiagramType.FLOWCHART,
+            audience_type="stakeholder",
+        )
+
+        self.assertTrue(len(captured_messages) > 0)
+        prompt_content = captured_messages[0]["content"]
+        stakeholder_role = agent.STAKEHOLDER_DIAGRAM_TEMPLATES[DiagramType.FLOWCHART]["system_role"]
+        self.assertIn(stakeholder_role[:20], prompt_content)
+
+
+class TestStakeholderPDF(unittest.TestCase):
+    """Tests for the stakeholder PDF builder."""
+
+    def _make_diagram(self, diagram_type: str, include_image: bool = True) -> dict:
+        """Build a minimal diagram dict with a tiny real PNG."""
+        import base64
+        from PIL import Image as PILImage
+        from io import BytesIO
+
+        image_data = None
+        if include_image:
+            img = PILImage.new("RGB", (100, 50), color=(200, 200, 200))
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            image_data = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+        return {
+            "diagram_type": diagram_type,
+            "title": diagram_type.replace("_", " ").title(),
+            "image_data": image_data,
+            "is_valid": True,
+        }
+
+    def _make_proposal(self, **overrides) -> dict:
+        base = {
+            "title": "Customer Portal",
+            "description": "A self-service customer portal for account management.",
+            "requirements": ["User login", "Dashboard", "Reports"],
+            "constraints": ["Go live within 6 months"],
+            "timeline_weeks": 24,
+            "team_size": 6,
+            "budget_range": "$50k-$80k",
+            "tech_stack": ["React", "FastAPI"],
+            "priority": "high",
+        }
+        base.update(overrides)
+        return base
+
+    def test_returns_bytes_io(self):
+        """build_stakeholder_pdf should return a BytesIO buffer."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+        from io import BytesIO
+
+        diagrams = [self._make_diagram("flowchart")]
+        buf = build_stakeholder_pdf(diagrams, self._make_proposal())
+        self.assertIsInstance(buf, BytesIO)
+
+    def test_buffer_is_non_empty(self):
+        """PDF buffer should contain data."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        diagrams = [self._make_diagram("flowchart"), self._make_diagram("gantt")]
+        buf = build_stakeholder_pdf(diagrams, self._make_proposal())
+        content = buf.read()
+        self.assertGreater(len(content), 0)
+
+    def test_buffer_starts_with_pdf_magic_bytes(self):
+        """Generated file should be a valid PDF (starts with %PDF)."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        diagrams = [self._make_diagram("flowchart")]
+        buf = build_stakeholder_pdf(diagrams, self._make_proposal())
+        self.assertTrue(buf.read(4) == b"%PDF")
+
+    def test_diagram_without_image_is_skipped(self):
+        """Diagrams with no image_data should not crash the builder."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        diagrams = [
+            self._make_diagram("flowchart", include_image=False),
+            self._make_diagram("gantt", include_image=True),
+        ]
+        buf = build_stakeholder_pdf(diagrams, self._make_proposal())
+        self.assertGreater(len(buf.read()), 0)
+
+    def test_empty_diagram_list_still_builds(self):
+        """An empty diagram list should produce a spec-only PDF without crashing."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        buf = build_stakeholder_pdf([], self._make_proposal())
+        self.assertGreater(len(buf.read()), 0)
+
+    def test_missing_optional_proposal_fields(self):
+        """Missing optional fields (requirements, constraints, etc.) should not crash."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        proposal = {"title": "Minimal Project", "description": "Minimal description here."}
+        diagrams = [self._make_diagram("flowchart")]
+        buf = build_stakeholder_pdf(diagrams, proposal)
+        self.assertGreater(len(buf.read()), 0)
+
+    def test_all_three_stakeholder_diagram_types_rendered(self):
+        """All three stakeholder diagram types should be included without error."""
+        import sys; sys.path.insert(0, 'frontend')
+        from document_pdf import build_stakeholder_pdf
+
+        diagrams = [
+            self._make_diagram("flowchart"),
+            self._make_diagram("gantt"),
+            self._make_diagram("architecture"),
+        ]
+        buf = build_stakeholder_pdf(diagrams, self._make_proposal())
+        self.assertTrue(buf.read(4) == b"%PDF")
+
+
+class TestEmailSender(unittest.TestCase):
+    """Tests for the email sender module."""
+
+    def setUp(self):
+        import sys
+        sys.path.insert(0, 'frontend')
+
+    def test_raises_value_error_when_smtp_not_configured(self):
+        """send_pdf_email should raise ValueError if SMTP config is missing."""
+        from email_sender import send_pdf_email
+        from unittest.mock import patch
+        from io import BytesIO
+
+        with patch('email_sender.Config') as mock_cfg:
+            mock_cfg.SMTP_HOST = ""
+            mock_cfg.SMTP_USER = ""
+            mock_cfg.SMTP_PASSWORD = ""
+            mock_cfg.SMTP_PORT = 587
+            mock_cfg.SMTP_USE_TLS = True
+
+            with self.assertRaises(ValueError) as ctx:
+                send_pdf_email(
+                    recipient="user@example.com",
+                    pdf_buffer=BytesIO(b"%PDF-fake"),
+                    project_title="Test",
+                    audience_type="engineer",
+                )
+            self.assertIn("SMTP", str(ctx.exception))
+
+    @patch('email_sender.smtplib.SMTP')
+    def test_sends_email_when_smtp_configured(self, mock_smtp_cls):
+        """send_pdf_email should call SMTP login and sendmail when configured."""
+        from email_sender import send_pdf_email
+        from unittest.mock import patch, MagicMock
+        from io import BytesIO
+
+        mock_server = MagicMock()
+        mock_smtp_cls.return_value.__enter__ = Mock(return_value=mock_server)
+        mock_smtp_cls.return_value.__exit__ = Mock(return_value=False)
+
+        with patch('email_sender.Config') as mock_cfg:
+            mock_cfg.SMTP_HOST = "smtp.example.com"
+            mock_cfg.SMTP_USER = "sender@example.com"
+            mock_cfg.SMTP_PASSWORD = "secret"
+            mock_cfg.SMTP_PORT = 587
+            mock_cfg.SMTP_USE_TLS = False
+
+            send_pdf_email(
+                recipient="user@example.com",
+                pdf_buffer=BytesIO(b"%PDF-fake"),
+                project_title="Test Project",
+                audience_type="stakeholder",
+            )
+
+        mock_server.login.assert_called_once_with("sender@example.com", "secret")
+        mock_server.sendmail.assert_called_once()
+
+    @patch('email_sender.smtplib.SMTP')
+    def test_subject_reflects_audience_type_stakeholder(self, mock_smtp_cls):
+        """Email subject should say 'Stakeholder Report' for stakeholder audience."""
+        from email_sender import send_pdf_email
+        from unittest.mock import patch, MagicMock
+        from io import BytesIO
+
+        mock_server = MagicMock()
+        mock_smtp_cls.return_value.__enter__ = Mock(return_value=mock_server)
+        mock_smtp_cls.return_value.__exit__ = Mock(return_value=False)
+
+        with patch('email_sender.Config') as mock_cfg:
+            mock_cfg.SMTP_HOST = "smtp.example.com"
+            mock_cfg.SMTP_USER = "sender@example.com"
+            mock_cfg.SMTP_PASSWORD = "secret"
+            mock_cfg.SMTP_PORT = 587
+            mock_cfg.SMTP_USE_TLS = False
+
+            send_pdf_email(
+                recipient="user@example.com",
+                pdf_buffer=BytesIO(b"%PDF-fake"),
+                project_title="Portal Launch",
+                audience_type="stakeholder",
+            )
+
+        _, _, msg_str = mock_server.sendmail.call_args[0]
+        self.assertIn("Stakeholder Report", msg_str)
+        self.assertIn("Portal Launch", msg_str)
+
+    @patch('email_sender.smtplib.SMTP')
+    def test_subject_reflects_audience_type_engineer(self, mock_smtp_cls):
+        """Email subject should say 'Engineering Report' for engineer audience."""
+        from email_sender import send_pdf_email
+        from unittest.mock import patch, MagicMock
+        from io import BytesIO
+
+        mock_server = MagicMock()
+        mock_smtp_cls.return_value.__enter__ = Mock(return_value=mock_server)
+        mock_smtp_cls.return_value.__exit__ = Mock(return_value=False)
+
+        with patch('email_sender.Config') as mock_cfg:
+            mock_cfg.SMTP_HOST = "smtp.example.com"
+            mock_cfg.SMTP_USER = "sender@example.com"
+            mock_cfg.SMTP_PASSWORD = "secret"
+            mock_cfg.SMTP_PORT = 587
+            mock_cfg.SMTP_USE_TLS = False
+
+            send_pdf_email(
+                recipient="engineer@company.com",
+                pdf_buffer=BytesIO(b"%PDF-fake"),
+                project_title="Infra Upgrade",
+                audience_type="engineer",
+            )
+
+        _, _, msg_str = mock_server.sendmail.call_args[0]
+        self.assertIn("Engineering Report", msg_str)
+
+    @patch('email_sender.smtplib.SMTP')
+    def test_pdf_is_attached(self, mock_smtp_cls):
+        """PDF bytes should be included in the sent message as an attachment."""
+        from email_sender import send_pdf_email
+        from unittest.mock import patch, MagicMock
+        from io import BytesIO
+        import base64
+
+        mock_server = MagicMock()
+        mock_smtp_cls.return_value.__enter__ = Mock(return_value=mock_server)
+        mock_smtp_cls.return_value.__exit__ = Mock(return_value=False)
+
+        fake_pdf = b"%PDF-1.4 fake content"
+        with patch('email_sender.Config') as mock_cfg:
+            mock_cfg.SMTP_HOST = "smtp.example.com"
+            mock_cfg.SMTP_USER = "sender@example.com"
+            mock_cfg.SMTP_PASSWORD = "secret"
+            mock_cfg.SMTP_PORT = 587
+            mock_cfg.SMTP_USE_TLS = False
+
+            send_pdf_email(
+                recipient="user@example.com",
+                pdf_buffer=BytesIO(fake_pdf),
+                project_title="Project",
+                audience_type="engineer",
+            )
+
+        _, _, msg_str = mock_server.sendmail.call_args[0]
+        self.assertIn("application/pdf", msg_str)
+
+
+class TestFlowForgeStateAudienceType(unittest.TestCase):
+    """Tests that FlowForgeState carries audience_type correctly."""
+
+    def test_state_stores_audience_type(self):
+        """FlowForgeState should accept and return audience_type."""
+        from src.workflow.graph_workflow import FlowForgeState
+
+        state = FlowForgeState(
+            proposal="Test",
+            prompt="Test",
+            hf_token="token",
+            audience_type="stakeholder",
+        )
+        self.assertEqual(state["audience_type"], "stakeholder")
+        self.assertEqual(state.audience_type, "stakeholder")
+
+    def test_state_audience_type_defaults_not_present_before_set(self):
+        """FlowForgeState raises AttributeError for missing keys, not silent None."""
+        from src.workflow.graph_workflow import FlowForgeState
+
+        state = FlowForgeState(proposal="Test", prompt="Test", hf_token="t")
+        with self.assertRaises((KeyError, AttributeError)):
+            _ = state["audience_type"]
+
+    @patch('src.workflow.graph_workflow.SessionManager')
+    @patch('src.workflow.graph_workflow.TimeAgent')
+    @patch('src.workflow.graph_workflow.TimeValidatorAgent')
+    @patch('src.workflow.graph_workflow.PlanAgent')
+    @patch('src.workflow.graph_workflow.ImageGeneratorAgent')
+    @patch('src.workflow.graph_workflow.ValidatorAgent')
+    def test_run_workflow_sets_audience_type_in_initial_state(
+        self,
+        mock_validator,
+        mock_image,
+        mock_plan,
+        mock_time_validator,
+        mock_time,
+        mock_session_manager,
+    ):
+        """run_flowforge_workflow should pass audience_type into the initial state."""
+        from src.workflow.graph_workflow import run_flowforge_workflow
+
+        captured_state = {}
+
+        def capture_execute(state):
+            captured_state.update(state)
+            return {**state, "timetable": "Phase 1", "milestones": [], "parallel_work_streams": [], "error": None}
+
+        mock_time.return_value.execute = capture_execute
+        mock_time_validator.return_value.execute = Mock(return_value={"time_overall_validation": True, "error": None})
+        mock_plan.return_value.execute = Mock(return_value={"plan": "plan", "error": None})
+        mock_image.return_value.execute = Mock(return_value={"diagrams": [], "diagram_count": 0, "valid_diagram_count": 0, "error": None})
+        mock_validator.return_value.execute = Mock(return_value={"validation_results": [], "overall_validation": True, "error": None})
+
+        run_flowforge_workflow(
+            proposal="Build a portal",
+            prompt="Diagrams please",
+            hf_token="test-token",
+            audience_type="stakeholder",
+            optimize_prompt=False,
+        )
+
+        self.assertEqual(captured_state.get("audience_type"), "stakeholder")
 
 
 if __name__ == '__main__':

@@ -24,6 +24,7 @@ def build_payload() -> dict:
             "optimize_prompt": st.session_state.optimize_prompt,
             "include_gantt": st.session_state.include_gantt,
             "include_parallel_work": True,
+            "audience_type": st.session_state.audience_type,
         },
         "hf_token": st.session_state.hf_token,   
     }
