@@ -257,8 +257,8 @@ class ValidatorAgent(BaseValidatorAgent):
     ) -> str:
         """Build improvement feedback for the image generator.
 
-        Separates syntax failures (must fix) from quality suggestions (nice to fix).
-        Keeps feedback concrete to prevent LLM hallucination.
+        Syntax failures (critical_issues) are hard requirements — must be fixed.
+        Quality suggestions are advisory — improve if possible.
         """
         syntax_failures = [d for d in invalid_diagrams if d.get("critical_issues")]
         quality_suggestions = [d for d in invalid_diagrams if not d.get("critical_issues") and d.get("suggestions")]
@@ -277,17 +277,12 @@ class ValidatorAgent(BaseValidatorAgent):
 
         if quality_suggestions:
             prompt_parts.append(
-                "\nQUALITY IMPROVEMENTS — apply these to make diagrams more readable:"
+                "\nADVISORY IMPROVEMENTS — apply these to improve clarity and readability:"
             )
             for diag in quality_suggestions:
                 diag_type = diag.get("diagram_type", "unknown")
                 for sug in diag.get("suggestions", []):
                     prompt_parts.append(f"  [{diag_type}] {sug}")
-
-        prompt_parts.append(
-            "\nKeep all Mermaid syntax valid: correct start keyword, balanced brackets, "
-            "no parentheses inside [] labels, no prose after the last diagram line."
-        )
 
         return "\n".join(prompt_parts)
 
@@ -323,11 +318,6 @@ class ValidatorAgent(BaseValidatorAgent):
 
         basic_result = self._basic_mermaid_validation(diagram)
 
-        self.logger.info(
-            "Basic validation result=%s",
-            basic_result,
-        )
-
         if not basic_result["is_valid"]:
             self.logger.warning(
                 "Basic Mermaid validation failed: %s",
@@ -338,31 +328,30 @@ class ValidatorAgent(BaseValidatorAgent):
                 "is_valid": False,
                 "feedback": basic_result["feedback"],
                 "suggestions": [],
-                "critical_issues": [],
+                "critical_issues": [basic_result["feedback"]],
                 "warnings": [],
             }
 
-        # Basic validation passed — diagram is syntactically valid.
-        # Now ask LLM for visual/structural quality feedback only (never overrides is_valid).
+        # Syntax check passed — LLM is advisory only, never overrides is_valid.
         quality_prompt = (
-            "You are a diagram quality reviewer. The Mermaid diagram below is syntactically valid.\n"
-            "Your job is ONLY to identify visual or structural quality issues that would make the diagram\n"
-            "hard to read or understand — NOT syntax errors.\n\n"
-            "Look for:\n"
-            "- Too many nodes causing clutter (>20 nodes)\n"
-            "- Deeply nested chains that are hard to follow (>8 levels deep)\n"
-            "- Nodes with too many edges making the diagram unreadable\n"
-            "- Missing logical grouping (subgraphs would help)\n"
-            "- Diagram is too generic (just a linear chain with no branching)\n\n"
+            "You are a diagram quality adviser. The Mermaid diagram below is syntactically valid.\n"
+            "Your ONLY job is to suggest improvements to clarity, readability, and audience-appropriateness.\n"
+            "You are an ADVISER — you do not block or reject diagrams.\n\n"
+            "Advise on:\n"
+            "- Whether the diagram is too cluttered (>15 nodes) and could be simplified\n"
+            "- Whether backward/loop edges are causing visual crossing lines — suggest removing them for cleaner flow\n"
+            "- Whether the content matches the audience (stakeholder = business language only, engineer = technical depth)\n"
+            "- Whether subgraphs would improve grouping and reduce crossed arrows\n"
+            "- Whether labels are clear and concise\n\n"
             "Do NOT flag:\n"
-            "- Syntax issues (already validated)\n"
-            "- Missing features or content\n"
-            "- Style preferences\n\n"
-            f"Diagram type context: {diagram_type}\n\n"
+            "- Syntax correctness (already validated)\n"
+            "- Missing technical detail\n"
+            "- Stylistic preferences with no readability impact\n\n"
+            f"Diagram type: {diagram_type}\n\n"
             f"Mermaid Diagram:\n```\n{diagram}\n```\n\n"
             "Return ONLY this format:\n"
             "HAS_ISSUES: true/false\n"
-            "SUGGESTIONS: [list of specific improvements or None]\n"
+            "SUGGESTIONS: [list of specific advisory improvements, or None]\n"
         )
 
         try:

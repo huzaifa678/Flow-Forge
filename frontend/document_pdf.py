@@ -50,8 +50,8 @@ def build_pdf(diagrams):
         ),
     )
 
-    MAX_WIDTH = 500
-    MAX_HEIGHT = 700
+    MAX_WIDTH = 530
+    MAX_HEIGHT = 660
 
     first = True
     for diagram in diagrams_sorted:
