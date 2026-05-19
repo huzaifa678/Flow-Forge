@@ -6,11 +6,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
-COPY .env .
 COPY main.py .
 COPY alembic/ ./alembic/
-COPY alembic.ini .
+COPY alembic.docker.ini .
 
 EXPOSE 8000
-
-CMD ["python", "main.py"]

@@ -19,6 +19,7 @@ def get_engine():
         db_url = Config.DATABASE_URL
         if db_url and db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
+        print("DEBUG DB URL:", Config.DATABASE_URL)
         _engine = create_engine(
             db_url,
             echo=False,

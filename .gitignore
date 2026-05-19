@@ -2,3 +2,4 @@
 __pycache__
 .env
 alembic.ini
+.env.docker

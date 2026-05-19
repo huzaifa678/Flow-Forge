@@ -15,6 +15,14 @@ class DiagramType(str, Enum):
     ARCHITECTURE = "architecture"
     GANTT = "gantt"
 
+
+class AudienceType(str, Enum):
+    """Target audience for generated documents and diagrams."""
+
+    ENGINEER = "engineer"
+    STAKEHOLDER = "stakeholder"
+
+
 class PromptRequest(BaseModel):
     """Model for the prompt/custom instructions portion of the request."""
 
@@ -39,6 +47,10 @@ class PromptRequest(BaseModel):
         default="medium",
         description="Project priority level",
         pattern=r"^(low|medium|high|critical)$",
+    )
+    audience_type: AudienceType = Field(
+        default=AudienceType.ENGINEER,
+        description="Target audience: engineer (technical) or stakeholder (business)",
     )
 
 class ProposalRequest(BaseModel):
@@ -115,6 +127,7 @@ class DiagramGenerationRequest(BaseModel):
             "optimize prompt": "optimize_prompt",
             "include gantt": "include_gantt",
             "include parallel work": "include_parallel_work",
+            "audience type": "audience_type",
         }
 
         lower_keys = {k.strip().lower(): k for k in data.keys()}
